@@ -1,0 +1,39 @@
+{
+  "name": "cdt2d",
+  "version": "1.0.0",
+  "description": "Constrained Delaunay Triangulation in 2D",
+  "main": "index.js",
+  "dependencies": {
+    "robust-orientation": "^1.1.3"
+  },
+  "devDependencies": {
+    "canvas-fit": "^1.4.0",
+    "delaunay-triangulate": "^1.1.6",
+    "mouse-change": "^1.2.1",
+    "segment2": "^0.3.2",
+    "vec2": "^1.6.0"
+  },
+  "scripts": {
+    "test": "tape test/*.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mikolalysenko/cdt2d.git"
+  },
+  "keywords": [
+    "constrained",
+    "delaunay",
+    "triangulation",
+    "polygon",
+    "planar",
+    "graph",
+    "vertex",
+    "geometry"
+  ],
+  "author": "Mikola Lysenko",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mikolalysenko/cdt2d/issues"
+  },
+  "homepage": "https://github.com/mikolalysenko/cdt2d"
+}
