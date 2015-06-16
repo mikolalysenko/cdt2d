@@ -1,0 +1,3699 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>---</title>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" name="viewport" />
+<meta charset=utf-8></head>
+<body></body>
+<script language=javascript>
+(function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+'use strict'
+
+module.exports = createTriangulation
+
+function Triangulation(stars) {
+  this.stars = stars
+}
+
+var proto = Triangulation.prototype
+
+function removePair(list, j, k) {
+  for(var i=1, n=list.length; i<n; i+=2) {
+    if(list[i-1] === j && list[i] === k) {
+      list[i-1] = list[n-2]
+      list[i] = list[n-1]
+      list.length = n - 2
+      return
+    }
+  }
+}
+
+proto.removeTriangle = function(i, j, k) {
+  var stars = this.stars
+  removePair(stars[i], j, k)
+  removePair(stars[j], k, i)
+  removePair(stars[k], i, j)
+}
+
+proto.addTriangle = function(i, j, k) {
+  var stars = this.stars
+  stars[i].push(j, k)
+  stars[j].push(k, i)
+  stars[k].push(i, j)
+}
+
+proto.opposite = function(j, i) {
+  var list = this.stars[i]
+  for(var k=1, n=list.length; k<n; k+=2) {
+    if(list[k] === j) {
+      return list[k-1]
+    }
+  }
+  return -1
+}
+
+proto.flip = function(i, j) {
+  var a = this.opposite(i, j)
+  var b = this.opposite(j, i)
+  this.removeTriangle(i, j, a)
+  this.removeTriangle(j, i, b)
+  this.addTriangle(i, b, a)
+  this.addTriangle(j, a, b)
+}
+
+proto.edges = function() {
+  var stars = this.stars
+  var result = []
+  for(var i=0, n=stars.length; i<n; ++i) {
+    var list = stars[i]
+    for(var j=0, m=list.length; j<m; j+=2) {
+      result.push([list[j], list[j+1]])
+    }
+  }
+  return result
+}
+
+proto.cells = function() {
+  var stars = this.stars
+  var result = []
+  for(var i=0, n=stars.length; i<n; ++i) {
+    var list = stars[i]
+    for(var j=0, m=list.length; j<m; j+=2) {
+      var s = list[j]
+      var t = list[j+1]
+      if(i < Math.min(s, t)) {
+        result.push([i, s, t])
+      }
+    }
+  }
+  return result
+}
+
+function createTriangulation(numVerts) {
+  var stars = new Array(numVerts)
+  for(var i=0; i<numVerts; ++i) {
+    stars[i] = []
+  }
+  return new Triangulation(stars)
+}
+
+},{}],2:[function(require,module,exports){
+var size = require('element-size')
+
+module.exports = fit
+
+var scratch = new Float32Array(2)
+
+function fit(canvas, parent, scale) {
+  canvas.style.position = canvas.style.position || 'absolute'
+  canvas.style.top = 0
+  canvas.style.left = 0
+
+  resize.scale  = parseFloat(scale || 1)
+  resize.parent = parent
+
+  return resize()
+
+  function resize() {
+    var p = resize.parent || canvas.parentNode
+    if (typeof p === 'function') {
+      var dims   = p(scratch) || scratch
+      var width  = dims[0]
+      var height = dims[1]
+    } else
+    if (p && p !== document.body) {
+      var psize  = size(p)
+      var width  = psize[0]|0
+      var height = psize[1]|0
+    } else {
+      var width  = window.innerWidth
+      var height = window.innerHeight
+    }
+
+    canvas.width = width * resize.scale
+    canvas.height = height * resize.scale
+    canvas.style.width = width + 'px'
+    canvas.style.height = height + 'px'
+
+    return resize
+  }
+}
+
+},{"element-size":3}],3:[function(require,module,exports){
+module.exports = getSize
+
+function getSize(element) {
+  // Handle cases where the element is not already
+  // attached to the DOM by briefly appending it
+  // to document.body, and removing it again later.
+  if (element === window || element === document.body) {
+    return [window.innerWidth, window.innerHeight]
+  }
+
+  if (!element.parentNode) {
+    var temporary = true
+    document.body.appendChild(element)
+  }
+
+  var bounds = element.getBoundingClientRect()
+  var styles = getComputedStyle(element)
+  var height = (bounds.height|0)
+    + parse(styles.getPropertyValue('margin-top'))
+    + parse(styles.getPropertyValue('margin-bottom'))
+  var width  = (bounds.width|0)
+    + parse(styles.getPropertyValue('margin-left'))
+    + parse(styles.getPropertyValue('margin-right'))
+
+  if (temporary) {
+    document.body.removeChild(element)
+  }
+
+  return [width, height]
+}
+
+function parse(prop) {
+  return parseFloat(prop) || 0
+}
+
+},{}],4:[function(require,module,exports){
+"use strict"
+
+//High level idea:
+// 1. Use Clarkson's incremental construction to find convex hull
+// 2. Point location in triangulation by jump and walk
+
+module.exports = incrementalConvexHull
+
+var orient = require("robust-orientation")
+var compareCell = require("simplicial-complex").compareCells
+
+function compareInt(a, b) {
+  return a - b
+}
+
+function Simplex(vertices, adjacent, boundary) {
+  this.vertices = vertices
+  this.adjacent = adjacent
+  this.boundary = boundary
+  this.lastVisited = -1
+}
+
+Simplex.prototype.flip = function() {
+  var t = this.vertices[0]
+  this.vertices[0] = this.vertices[1]
+  this.vertices[1] = t
+  var u = this.adjacent[0]
+  this.adjacent[0] = this.adjacent[1]
+  this.adjacent[1] = u
+}
+
+function GlueFacet(vertices, cell, index) {
+  this.vertices = vertices
+  this.cell = cell
+  this.index = index
+}
+
+function compareGlue(a, b) {
+  return compareCell(a.vertices, b.vertices)
+}
+
+function bakeOrient(d) {
+  var code = ["function orient(){var tuple=this.tuple;return test("]
+  for(var i=0; i<=d; ++i) {
+    if(i > 0) {
+      code.push(",")
+    }
+    code.push("tuple[", i, "]")
+  }
+  code.push(")}return orient")
+  var proc = new Function("test", code.join(""))
+  var test = orient[d+1]
+  if(!test) {
+    test = orient
+  }
+  return proc(test)
+}
+
+var BAKED = []
+
+function Triangulation(dimension, vertices, simplices) {
+  this.dimension = dimension
+  this.vertices = vertices
+  this.simplices = simplices
+  this.interior = simplices.filter(function(c) {
+    return !c.boundary
+  })
+
+  this.tuple = new Array(dimension+1)
+  for(var i=0; i<=dimension; ++i) {
+    this.tuple[i] = this.vertices[i]
+  }
+
+  var o = BAKED[dimension]
+  if(!o) {
+    o = BAKED[dimension] = bakeOrient(dimension)
+  }
+  this.orient = o
+}
+
+var proto = Triangulation.prototype
+
+//Degenerate situation where we are on boundary, but coplanar to face
+proto.handleBoundaryDegeneracy = function(cell, point) {
+  var d = this.dimension
+  var n = this.vertices.length - 1
+  var tuple = this.tuple
+  var verts = this.vertices
+
+  //Dumb solution: Just do dfs from boundary cell until we find any peak, or terminate
+  var toVisit = [ cell ]
+  cell.lastVisited = -n
+  while(toVisit.length > 0) {
+    cell = toVisit.pop()
+    var cellVerts = cell.vertices
+    var cellAdj = cell.adjacent
+    for(var i=0; i<=d; ++i) {
+      var neighbor = cellAdj[i]
+      if(!neighbor.boundary || neighbor.lastVisited <= -n) {
+        continue
+      }
+      var nv = neighbor.vertices
+      for(var j=0; j<=d; ++j) {
+        var vv = nv[j]
+        if(vv < 0) {
+          tuple[j] = point
+        } else {
+          tuple[j] = verts[vv]
+        }
+      }
+      var o = this.orient()
+      if(o > 0) {
+        return neighbor
+      }
+      neighbor.lastVisited = -n
+      if(o === 0) {
+        toVisit.push(neighbor)
+      }
+    }
+  }
+  return null
+}
+
+proto.walk = function(point, random) {
+  //Alias local properties
+  var n = this.vertices.length - 1
+  var d = this.dimension
+  var verts = this.vertices
+  var tuple = this.tuple
+
+  //Compute initial jump cell
+  var initIndex = random ? (this.interior.length * Math.random())|0 : (this.interior.length-1)
+  var cell = this.interior[ initIndex ]
+
+  //Start walking
+outerLoop:
+  while(!cell.boundary) {
+    var cellVerts = cell.vertices
+    var cellAdj = cell.adjacent
+
+    for(var i=0; i<=d; ++i) {
+      tuple[i] = verts[cellVerts[i]]
+    }
+    cell.lastVisited = n
+
+    //Find farthest adjacent cell
+    for(var i=0; i<=d; ++i) {
+      var neighbor = cellAdj[i]
+      if(neighbor.lastVisited >= n) {
+        continue
+      }
+      var prev = tuple[i]
+      tuple[i] = point
+      var o = this.orient()
+      tuple[i] = prev
+      if(o < 0) {
+        cell = neighbor
+        continue outerLoop
+      } else {
+        if(!neighbor.boundary) {
+          neighbor.lastVisited = n
+        } else {
+          neighbor.lastVisited = -n
+        }
+      }
+    }
+    return
+  }
+
+  return cell
+}
+
+proto.addPeaks = function(point, cell) {
+  var n = this.vertices.length - 1
+  var d = this.dimension
+  var verts = this.vertices
+  var tuple = this.tuple
+  var interior = this.interior
+  var simplices = this.simplices
+
+  //Walking finished at boundary, time to add peaks
+  var tovisit = [ cell ]
+
+  //Stretch initial boundary cell into a peak
+  cell.lastVisited = n
+  cell.vertices[cell.vertices.indexOf(-1)] = n
+  cell.boundary = false
+  interior.push(cell)
+
+  //Record a list of all new boundaries created by added peaks so we can glue them together when we are all done
+  var glueFacets = []
+
+  //Do a traversal of the boundary walking outward from starting peak
+  while(tovisit.length > 0) {
+    //Pop off peak and walk over adjacent cells
+    var cell = tovisit.pop()
+    var cellVerts = cell.vertices
+    var cellAdj = cell.adjacent
+    var indexOfN = cellVerts.indexOf(n)
+    if(indexOfN < 0) {
+      continue
+    }
+
+    for(var i=0; i<=d; ++i) {
+      if(i === indexOfN) {
+        continue
+      }
+
+      //For each boundary neighbor of the cell
+      var neighbor = cellAdj[i]
+      if(!neighbor.boundary || neighbor.lastVisited >= n) {
+        continue
+      }
+
+      var nv = neighbor.vertices
+
+      //Test if neighbor is a peak
+      if(neighbor.lastVisited !== -n) {      
+        //Compute orientation of p relative to each boundary peak
+        var indexOfNeg1 = 0
+        for(var j=0; j<=d; ++j) {
+          if(nv[j] < 0) {
+            indexOfNeg1 = j
+            tuple[j] = point
+          } else {
+            tuple[j] = verts[nv[j]]
+          }
+        }
+        var o = this.orient()
+
+        //Test if neighbor cell is also a peak
+        if(o > 0) {
+          nv[indexOfNeg1] = n
+          neighbor.boundary = false
+          interior.push(neighbor)
+          tovisit.push(neighbor)
+          neighbor.lastVisited = n
+          continue
+        } else {
+          neighbor.lastVisited = -n
+        }
+      }
+
+      var na = neighbor.adjacent
+
+      //Otherwise, replace neighbor with new face
+      var vverts = cellVerts.slice()
+      var vadj = cellAdj.slice()
+      var ncell = new Simplex(vverts, vadj, true)
+      simplices.push(ncell)
+
+      //Connect to neighbor
+      var opposite = na.indexOf(cell)
+      if(opposite < 0) {
+        continue
+      }
+      na[opposite] = ncell
+      vadj[indexOfN] = neighbor
+
+      //Connect to cell
+      vverts[i] = -1
+      vadj[i] = cell
+      cellAdj[i] = ncell
+
+      //Flip facet
+      ncell.flip()
+
+      //Add to glue list
+      for(var j=0; j<=d; ++j) {
+        var uu = vverts[j]
+        if(uu < 0 || uu === n) {
+          continue
+        }
+        var nface = new Array(d-1)
+        var nptr = 0
+        for(var k=0; k<=d; ++k) {
+          var vv = vverts[k]
+          if(vv < 0 || k === j) {
+            continue
+          }
+          nface[nptr++] = vv
+        }
+        glueFacets.push(new GlueFacet(nface, ncell, j))
+      }
+    }
+  }
+
+  //Glue boundary facets together
+  glueFacets.sort(compareGlue)
+
+  for(var i=0; i+1<glueFacets.length; i+=2) {
+    var a = glueFacets[i]
+    var b = glueFacets[i+1]
+    var ai = a.index
+    var bi = b.index
+    if(ai < 0 || bi < 0) {
+      continue
+    }
+    a.cell.adjacent[a.index] = b.cell
+    b.cell.adjacent[b.index] = a.cell
+  }
+}
+
+proto.insert = function(point, random) {
+  //Add point
+  var verts = this.vertices
+  verts.push(point)
+
+  var cell = this.walk(point, random)
+  if(!cell) {
+    return
+  }
+
+  //Alias local properties
+  var d = this.dimension
+  var tuple = this.tuple
+
+  //Degenerate case: If point is coplanar to cell, then walk until we find a non-degenerate boundary
+  for(var i=0; i<=d; ++i) {
+    var vv = cell.vertices[i]
+    if(vv < 0) {
+      tuple[i] = point
+    } else {
+      tuple[i] = verts[vv]
+    }
+  }
+  var o = this.orient(tuple)
+  if(o < 0) {
+    return
+  } else if(o === 0) {
+    cell = this.handleBoundaryDegeneracy(cell, point)
+    if(!cell) {
+      return
+    }
+  }
+
+  //Add peaks
+  this.addPeaks(point, cell)
+}
+
+//Extract all boundary cells
+proto.boundary = function() {
+  var d = this.dimension
+  var boundary = []
+  var cells = this.simplices
+  var nc = cells.length
+  for(var i=0; i<nc; ++i) {
+    var c = cells[i]
+    if(c.boundary) {
+      var bcell = new Array(d)
+      var cv = c.vertices
+      var ptr = 0
+      var parity = 0
+      for(var j=0; j<=d; ++j) {
+        if(cv[j] >= 0) {
+          bcell[ptr++] = cv[j]
+        } else {
+          parity = j&1
+        }
+      }
+      if(parity === (d&1)) {
+        var t = bcell[0]
+        bcell[0] = bcell[1]
+        bcell[1] = t
+      }
+      boundary.push(bcell)
+    }
+  }
+  return boundary
+}
+
+function incrementalConvexHull(points, randomSearch) {
+  var n = points.length
+  if(n === 0) {
+    throw new Error("Must have at least d+1 points")
+  }
+  var d = points[0].length
+  if(n <= d) {
+    throw new Error("Must input at least d+1 points")
+  }
+
+  //FIXME: This could be degenerate, but need to select d+1 non-coplanar points to bootstrap process
+  var initialSimplex = points.slice(0, d+1)
+
+  //Make sure initial simplex is positively oriented
+  var o = orient.apply(void 0, initialSimplex)
+  if(o === 0) {
+    throw new Error("Input not in general position")
+  }
+  var initialCoords = new Array(d+1)
+  for(var i=0; i<=d; ++i) {
+    initialCoords[i] = i
+  }
+  if(o < 0) {
+    initialCoords[0] = 1
+    initialCoords[1] = 0
+  }
+
+  //Create initial topological index, glue pointers together (kind of messy)
+  var initialCell = new Simplex(initialCoords, new Array(d+1), false)
+  var boundary = initialCell.adjacent
+  var list = new Array(d+2)
+  for(var i=0; i<=d; ++i) {
+    var verts = initialCoords.slice()
+    for(var j=0; j<=d; ++j) {
+      if(j === i) {
+        verts[j] = -1
+      }
+    }
+    var t = verts[0]
+    verts[0] = verts[1]
+    verts[1] = t
+    var cell = new Simplex(verts, new Array(d+1), true)
+    boundary[i] = cell
+    list[i] = cell
+  }
+  list[d+1] = initialCell
+  for(var i=0; i<=d; ++i) {
+    var verts = boundary[i].vertices
+    var adj = boundary[i].adjacent
+    for(var j=0; j<=d; ++j) {
+      var v = verts[j]
+      if(v < 0) {
+        adj[j] = initialCell
+        continue
+      }
+      for(var k=0; k<=d; ++k) {
+        if(boundary[k].vertices.indexOf(v) < 0) {
+          adj[j] = boundary[k]
+        }
+      }
+    }
+  }
+
+  //Initialize triangles
+  var triangles = new Triangulation(d, initialSimplex, list)
+
+  //Insert remaining points
+  var useRandom = !!randomSearch
+  for(var i=d+1; i<n; ++i) {
+    triangles.insert(points[i], useRandom)
+  }
+  
+  //Extract boundary cells
+  return triangles.boundary()
+}
+},{"robust-orientation":10,"simplicial-complex":13}],5:[function(require,module,exports){
+"use strict"
+
+module.exports = fastTwoSum
+
+function fastTwoSum(a, b, result) {
+	var x = a + b
+	var bv = x - a
+	var av = x - bv
+	var br = b - bv
+	var ar = a - av
+	if(result) {
+		result[0] = ar + br
+		result[1] = x
+		return result
+	}
+	return [ar+br, x]
+}
+},{}],6:[function(require,module,exports){
+"use strict"
+
+var twoProduct = require("two-product")
+var twoSum = require("two-sum")
+
+module.exports = scaleLinearExpansion
+
+function scaleLinearExpansion(e, scale) {
+  var n = e.length
+  if(n === 1) {
+    var ts = twoProduct(e[0], scale)
+    if(ts[0]) {
+      return ts
+    }
+    return [ ts[1] ]
+  }
+  var g = new Array(2 * n)
+  var q = [0.1, 0.1]
+  var t = [0.1, 0.1]
+  var count = 0
+  twoProduct(e[0], scale, q)
+  if(q[0]) {
+    g[count++] = q[0]
+  }
+  for(var i=1; i<n; ++i) {
+    twoProduct(e[i], scale, t)
+    var pq = q[1]
+    twoSum(pq, t[0], q)
+    if(q[0]) {
+      g[count++] = q[0]
+    }
+    var a = t[1]
+    var b = q[1]
+    var x = a + b
+    var bv = x - a
+    var y = b - bv
+    q[1] = x
+    if(y) {
+      g[count++] = y
+    }
+  }
+  if(q[1]) {
+    g[count++] = q[1]
+  }
+  if(count === 0) {
+    g[count++] = 0.0
+  }
+  g.length = count
+  return g
+}
+},{"two-product":9,"two-sum":5}],7:[function(require,module,exports){
+"use strict"
+
+module.exports = robustSubtract
+
+//Easy case: Add two scalars
+function scalarScalar(a, b) {
+  var x = a + b
+  var bv = x - a
+  var av = x - bv
+  var br = b - bv
+  var ar = a - av
+  var y = ar + br
+  if(y) {
+    return [y, x]
+  }
+  return [x]
+}
+
+function robustSubtract(e, f) {
+  var ne = e.length|0
+  var nf = f.length|0
+  if(ne === 1 && nf === 1) {
+    return scalarScalar(e[0], -f[0])
+  }
+  var n = ne + nf
+  var g = new Array(n)
+  var count = 0
+  var eptr = 0
+  var fptr = 0
+  var abs = Math.abs
+  var ei = e[eptr]
+  var ea = abs(ei)
+  var fi = -f[fptr]
+  var fa = abs(fi)
+  var a, b
+  if(ea < fa) {
+    b = ei
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+      ea = abs(ei)
+    }
+  } else {
+    b = fi
+    fptr += 1
+    if(fptr < nf) {
+      fi = -f[fptr]
+      fa = abs(fi)
+    }
+  }
+  if((eptr < ne && ea < fa) || (fptr >= nf)) {
+    a = ei
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+      ea = abs(ei)
+    }
+  } else {
+    a = fi
+    fptr += 1
+    if(fptr < nf) {
+      fi = -f[fptr]
+      fa = abs(fi)
+    }
+  }
+  var x = a + b
+  var bv = x - a
+  var y = b - bv
+  var q0 = y
+  var q1 = x
+  var _x, _bv, _av, _br, _ar
+  while(eptr < ne && fptr < nf) {
+    if(ea < fa) {
+      a = ei
+      eptr += 1
+      if(eptr < ne) {
+        ei = e[eptr]
+        ea = abs(ei)
+      }
+    } else {
+      a = fi
+      fptr += 1
+      if(fptr < nf) {
+        fi = -f[fptr]
+        fa = abs(fi)
+      }
+    }
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    }
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+  }
+  while(eptr < ne) {
+    a = ei
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    }
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+    }
+  }
+  while(fptr < nf) {
+    a = fi
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    } 
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+    fptr += 1
+    if(fptr < nf) {
+      fi = -f[fptr]
+    }
+  }
+  if(q0) {
+    g[count++] = q0
+  }
+  if(q1) {
+    g[count++] = q1
+  }
+  if(!count) {
+    g[count++] = 0.0  
+  }
+  g.length = count
+  return g
+}
+},{}],8:[function(require,module,exports){
+"use strict"
+
+module.exports = linearExpansionSum
+
+//Easy case: Add two scalars
+function scalarScalar(a, b) {
+  var x = a + b
+  var bv = x - a
+  var av = x - bv
+  var br = b - bv
+  var ar = a - av
+  var y = ar + br
+  if(y) {
+    return [y, x]
+  }
+  return [x]
+}
+
+function linearExpansionSum(e, f) {
+  var ne = e.length|0
+  var nf = f.length|0
+  if(ne === 1 && nf === 1) {
+    return scalarScalar(e[0], f[0])
+  }
+  var n = ne + nf
+  var g = new Array(n)
+  var count = 0
+  var eptr = 0
+  var fptr = 0
+  var abs = Math.abs
+  var ei = e[eptr]
+  var ea = abs(ei)
+  var fi = f[fptr]
+  var fa = abs(fi)
+  var a, b
+  if(ea < fa) {
+    b = ei
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+      ea = abs(ei)
+    }
+  } else {
+    b = fi
+    fptr += 1
+    if(fptr < nf) {
+      fi = f[fptr]
+      fa = abs(fi)
+    }
+  }
+  if((eptr < ne && ea < fa) || (fptr >= nf)) {
+    a = ei
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+      ea = abs(ei)
+    }
+  } else {
+    a = fi
+    fptr += 1
+    if(fptr < nf) {
+      fi = f[fptr]
+      fa = abs(fi)
+    }
+  }
+  var x = a + b
+  var bv = x - a
+  var y = b - bv
+  var q0 = y
+  var q1 = x
+  var _x, _bv, _av, _br, _ar
+  while(eptr < ne && fptr < nf) {
+    if(ea < fa) {
+      a = ei
+      eptr += 1
+      if(eptr < ne) {
+        ei = e[eptr]
+        ea = abs(ei)
+      }
+    } else {
+      a = fi
+      fptr += 1
+      if(fptr < nf) {
+        fi = f[fptr]
+        fa = abs(fi)
+      }
+    }
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    }
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+  }
+  while(eptr < ne) {
+    a = ei
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    }
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+    eptr += 1
+    if(eptr < ne) {
+      ei = e[eptr]
+    }
+  }
+  while(fptr < nf) {
+    a = fi
+    b = q0
+    x = a + b
+    bv = x - a
+    y = b - bv
+    if(y) {
+      g[count++] = y
+    } 
+    _x = q1 + x
+    _bv = _x - q1
+    _av = _x - _bv
+    _br = x - _bv
+    _ar = q1 - _av
+    q0 = _ar + _br
+    q1 = _x
+    fptr += 1
+    if(fptr < nf) {
+      fi = f[fptr]
+    }
+  }
+  if(q0) {
+    g[count++] = q0
+  }
+  if(q1) {
+    g[count++] = q1
+  }
+  if(!count) {
+    g[count++] = 0.0  
+  }
+  g.length = count
+  return g
+}
+},{}],9:[function(require,module,exports){
+"use strict"
+
+module.exports = twoProduct
+
+var SPLITTER = +(Math.pow(2, 27) + 1.0)
+
+function twoProduct(a, b, result) {
+  var x = a * b
+
+  var c = SPLITTER * a
+  var abig = c - a
+  var ahi = c - abig
+  var alo = a - ahi
+
+  var d = SPLITTER * b
+  var bbig = d - b
+  var bhi = d - bbig
+  var blo = b - bhi
+
+  var err1 = x - (ahi * bhi)
+  var err2 = err1 - (alo * bhi)
+  var err3 = err2 - (ahi * blo)
+
+  var y = alo * blo - err3
+
+  if(result) {
+    result[0] = y
+    result[1] = x
+    return result
+  }
+
+  return [ y, x ]
+}
+},{}],10:[function(require,module,exports){
+"use strict"
+
+var twoProduct = require("two-product")
+var robustSum = require("robust-sum")
+var robustScale = require("robust-scale")
+var robustSubtract = require("robust-subtract")
+
+var NUM_EXPAND = 5
+
+var EPSILON     = 1.1102230246251565e-16
+var ERRBOUND3   = (3.0 + 16.0 * EPSILON) * EPSILON
+var ERRBOUND4   = (7.0 + 56.0 * EPSILON) * EPSILON
+
+function cofactor(m, c) {
+  var result = new Array(m.length-1)
+  for(var i=1; i<m.length; ++i) {
+    var r = result[i-1] = new Array(m.length-1)
+    for(var j=0,k=0; j<m.length; ++j) {
+      if(j === c) {
+        continue
+      }
+      r[k++] = m[i][j]
+    }
+  }
+  return result
+}
+
+function matrix(n) {
+  var result = new Array(n)
+  for(var i=0; i<n; ++i) {
+    result[i] = new Array(n)
+    for(var j=0; j<n; ++j) {
+      result[i][j] = ["m", j, "[", (n-i-1), "]"].join("")
+    }
+  }
+  return result
+}
+
+function sign(n) {
+  if(n & 1) {
+    return "-"
+  }
+  return ""
+}
+
+function generateSum(expr) {
+  if(expr.length === 1) {
+    return expr[0]
+  } else if(expr.length === 2) {
+    return ["sum(", expr[0], ",", expr[1], ")"].join("")
+  } else {
+    var m = expr.length>>1
+    return ["sum(", generateSum(expr.slice(0, m)), ",", generateSum(expr.slice(m)), ")"].join("")
+  }
+}
+
+function determinant(m) {
+  if(m.length === 2) {
+    return [["sum(prod(", m[0][0], ",", m[1][1], "),prod(-", m[0][1], ",", m[1][0], "))"].join("")]
+  } else {
+    var expr = []
+    for(var i=0; i<m.length; ++i) {
+      expr.push(["scale(", generateSum(determinant(cofactor(m, i))), ",", sign(i), m[0][i], ")"].join(""))
+    }
+    return expr
+  }
+}
+
+function orientation(n) {
+  var pos = []
+  var neg = []
+  var m = matrix(n)
+  var args = []
+  for(var i=0; i<n; ++i) {
+    if((i&1)===0) {
+      pos.push.apply(pos, determinant(cofactor(m, i)))
+    } else {
+      neg.push.apply(neg, determinant(cofactor(m, i)))
+    }
+    args.push("m" + i)
+  }
+  var posExpr = generateSum(pos)
+  var negExpr = generateSum(neg)
+  var funcName = "orientation" + n + "Exact"
+  var code = ["function ", funcName, "(", args.join(), "){var p=", posExpr, ",n=", negExpr, ",d=sub(p,n);\
+return d[d.length-1];};return ", funcName].join("")
+  var proc = new Function("sum", "prod", "scale", "sub", code)
+  return proc(robustSum, twoProduct, robustScale, robustSubtract)
+}
+
+var orientation3Exact = orientation(3)
+var orientation4Exact = orientation(4)
+
+var CACHED = [
+  function orientation0() { return 0 },
+  function orientation1() { return 0 },
+  function orientation2(a, b) { 
+    return b[0] - a[0]
+  },
+  function orientation3(a, b, c) {
+    var l = (a[1] - c[1]) * (b[0] - c[0])
+    var r = (a[0] - c[0]) * (b[1] - c[1])
+    var det = l - r
+    var s
+    if(l > 0) {
+      if(r <= 0) {
+        return det
+      } else {
+        s = l + r
+      }
+    } else if(l < 0) {
+      if(r >= 0) {
+        return det
+      } else {
+        s = -(l + r)
+      }
+    } else {
+      return det
+    }
+    var tol = ERRBOUND3 * s
+    if(det >= tol || det <= -tol) {
+      return det
+    }
+    return orientation3Exact(a, b, c)
+  },
+  function orientation4(a,b,c,d) {
+    var adx = a[0] - d[0]
+    var bdx = b[0] - d[0]
+    var cdx = c[0] - d[0]
+    var ady = a[1] - d[1]
+    var bdy = b[1] - d[1]
+    var cdy = c[1] - d[1]
+    var adz = a[2] - d[2]
+    var bdz = b[2] - d[2]
+    var cdz = c[2] - d[2]
+    var bdxcdy = bdx * cdy
+    var cdxbdy = cdx * bdy
+    var cdxady = cdx * ady
+    var adxcdy = adx * cdy
+    var adxbdy = adx * bdy
+    var bdxady = bdx * ady
+    var det = adz * (bdxcdy - cdxbdy) 
+            + bdz * (cdxady - adxcdy)
+            + cdz * (adxbdy - bdxady)
+    var permanent = (Math.abs(bdxcdy) + Math.abs(cdxbdy)) * Math.abs(adz)
+                  + (Math.abs(cdxady) + Math.abs(adxcdy)) * Math.abs(bdz)
+                  + (Math.abs(adxbdy) + Math.abs(bdxady)) * Math.abs(cdz)
+    var tol = ERRBOUND4 * permanent
+    if ((det > tol) || (-det > tol)) {
+      return det
+    }
+    return orientation4Exact(a,b,c,d)
+  }
+]
+
+function slowOrient(args) {
+  var proc = CACHED[args.length]
+  if(!proc) {
+    proc = CACHED[args.length] = orientation(args.length)
+  }
+  return proc.apply(undefined, args)
+}
+
+function generateOrientationProc() {
+  while(CACHED.length <= NUM_EXPAND) {
+    CACHED.push(orientation(CACHED.length))
+  }
+  var args = []
+  var procArgs = ["slow"]
+  for(var i=0; i<=NUM_EXPAND; ++i) {
+    args.push("a" + i)
+    procArgs.push("o" + i)
+  }
+  var code = [
+    "function getOrientation(", args.join(), "){switch(arguments.length){case 0:case 1:return 0;"
+  ]
+  for(var i=2; i<=NUM_EXPAND; ++i) {
+    code.push("case ", i, ":return o", i, "(", args.slice(0, i).join(), ");")
+  }
+  code.push("}var s=new Array(arguments.length);for(var i=0;i<arguments.length;++i){s[i]=arguments[i]};return slow(s);}return getOrientation")
+  procArgs.push(code.join(""))
+
+  var proc = Function.apply(undefined, procArgs)
+  module.exports = proc.apply(undefined, [slowOrient].concat(CACHED))
+  for(var i=0; i<=NUM_EXPAND; ++i) {
+    module.exports[i] = CACHED[i]
+  }
+}
+
+generateOrientationProc()
+},{"robust-scale":6,"robust-subtract":7,"robust-sum":8,"two-product":9}],11:[function(require,module,exports){
+/**
+ * Bit twiddling hacks for JavaScript.
+ *
+ * Author: Mikola Lysenko
+ *
+ * Ported from Stanford bit twiddling hack library:
+ *    http://graphics.stanford.edu/~seander/bithacks.html
+ */
+
+"use strict"; "use restrict";
+
+//Number of bits in an integer
+var INT_BITS = 32;
+
+//Constants
+exports.INT_BITS  = INT_BITS;
+exports.INT_MAX   =  0x7fffffff;
+exports.INT_MIN   = -1<<(INT_BITS-1);
+
+//Returns -1, 0, +1 depending on sign of x
+exports.sign = function(v) {
+  return (v > 0) - (v < 0);
+}
+
+//Computes absolute value of integer
+exports.abs = function(v) {
+  var mask = v >> (INT_BITS-1);
+  return (v ^ mask) - mask;
+}
+
+//Computes minimum of integers x and y
+exports.min = function(x, y) {
+  return y ^ ((x ^ y) & -(x < y));
+}
+
+//Computes maximum of integers x and y
+exports.max = function(x, y) {
+  return x ^ ((x ^ y) & -(x < y));
+}
+
+//Checks if a number is a power of two
+exports.isPow2 = function(v) {
+  return !(v & (v-1)) && (!!v);
+}
+
+//Computes log base 2 of v
+exports.log2 = function(v) {
+  var r, shift;
+  r =     (v > 0xFFFF) << 4; v >>>= r;
+  shift = (v > 0xFF  ) << 3; v >>>= shift; r |= shift;
+  shift = (v > 0xF   ) << 2; v >>>= shift; r |= shift;
+  shift = (v > 0x3   ) << 1; v >>>= shift; r |= shift;
+  return r | (v >> 1);
+}
+
+//Computes log base 10 of v
+exports.log10 = function(v) {
+  return  (v >= 1000000000) ? 9 : (v >= 100000000) ? 8 : (v >= 10000000) ? 7 :
+          (v >= 1000000) ? 6 : (v >= 100000) ? 5 : (v >= 10000) ? 4 :
+          (v >= 1000) ? 3 : (v >= 100) ? 2 : (v >= 10) ? 1 : 0;
+}
+
+//Counts number of bits
+exports.popCount = function(v) {
+  v = v - ((v >>> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return ((v + (v >>> 4) & 0xF0F0F0F) * 0x1010101) >>> 24;
+}
+
+//Counts number of trailing zeros
+function countTrailingZeros(v) {
+  var c = 32;
+  v &= -v;
+  if (v) c--;
+  if (v & 0x0000FFFF) c -= 16;
+  if (v & 0x00FF00FF) c -= 8;
+  if (v & 0x0F0F0F0F) c -= 4;
+  if (v & 0x33333333) c -= 2;
+  if (v & 0x55555555) c -= 1;
+  return c;
+}
+exports.countTrailingZeros = countTrailingZeros;
+
+//Rounds to next power of 2
+exports.nextPow2 = function(v) {
+  v += v === 0;
+  --v;
+  v |= v >>> 1;
+  v |= v >>> 2;
+  v |= v >>> 4;
+  v |= v >>> 8;
+  v |= v >>> 16;
+  return v + 1;
+}
+
+//Rounds down to previous power of 2
+exports.prevPow2 = function(v) {
+  v |= v >>> 1;
+  v |= v >>> 2;
+  v |= v >>> 4;
+  v |= v >>> 8;
+  v |= v >>> 16;
+  return v - (v>>>1);
+}
+
+//Computes parity of word
+exports.parity = function(v) {
+  v ^= v >>> 16;
+  v ^= v >>> 8;
+  v ^= v >>> 4;
+  v &= 0xf;
+  return (0x6996 >>> v) & 1;
+}
+
+var REVERSE_TABLE = new Array(256);
+
+(function(tab) {
+  for(var i=0; i<256; ++i) {
+    var v = i, r = i, s = 7;
+    for (v >>>= 1; v; v >>>= 1) {
+      r <<= 1;
+      r |= v & 1;
+      --s;
+    }
+    tab[i] = (r << s) & 0xff;
+  }
+})(REVERSE_TABLE);
+
+//Reverse bits in a 32 bit word
+exports.reverse = function(v) {
+  return  (REVERSE_TABLE[ v         & 0xff] << 24) |
+          (REVERSE_TABLE[(v >>> 8)  & 0xff] << 16) |
+          (REVERSE_TABLE[(v >>> 16) & 0xff] << 8)  |
+           REVERSE_TABLE[(v >>> 24) & 0xff];
+}
+
+//Interleave bits of 2 coordinates with 16 bits.  Useful for fast quadtree codes
+exports.interleave2 = function(x, y) {
+  x &= 0xFFFF;
+  x = (x | (x << 8)) & 0x00FF00FF;
+  x = (x | (x << 4)) & 0x0F0F0F0F;
+  x = (x | (x << 2)) & 0x33333333;
+  x = (x | (x << 1)) & 0x55555555;
+
+  y &= 0xFFFF;
+  y = (y | (y << 8)) & 0x00FF00FF;
+  y = (y | (y << 4)) & 0x0F0F0F0F;
+  y = (y | (y << 2)) & 0x33333333;
+  y = (y | (y << 1)) & 0x55555555;
+
+  return x | (y << 1);
+}
+
+//Extracts the nth interleaved component
+exports.deinterleave2 = function(v, n) {
+  v = (v >>> n) & 0x55555555;
+  v = (v | (v >>> 1))  & 0x33333333;
+  v = (v | (v >>> 2))  & 0x0F0F0F0F;
+  v = (v | (v >>> 4))  & 0x00FF00FF;
+  v = (v | (v >>> 16)) & 0x000FFFF;
+  return (v << 16) >> 16;
+}
+
+
+//Interleave bits of 3 coordinates, each with 10 bits.  Useful for fast octree codes
+exports.interleave3 = function(x, y, z) {
+  x &= 0x3FF;
+  x  = (x | (x<<16)) & 4278190335;
+  x  = (x | (x<<8))  & 251719695;
+  x  = (x | (x<<4))  & 3272356035;
+  x  = (x | (x<<2))  & 1227133513;
+
+  y &= 0x3FF;
+  y  = (y | (y<<16)) & 4278190335;
+  y  = (y | (y<<8))  & 251719695;
+  y  = (y | (y<<4))  & 3272356035;
+  y  = (y | (y<<2))  & 1227133513;
+  x |= (y << 1);
+  
+  z &= 0x3FF;
+  z  = (z | (z<<16)) & 4278190335;
+  z  = (z | (z<<8))  & 251719695;
+  z  = (z | (z<<4))  & 3272356035;
+  z  = (z | (z<<2))  & 1227133513;
+  
+  return x | (z << 2);
+}
+
+//Extracts nth interleaved component of a 3-tuple
+exports.deinterleave3 = function(v, n) {
+  v = (v >>> n)       & 1227133513;
+  v = (v | (v>>>2))   & 3272356035;
+  v = (v | (v>>>4))   & 251719695;
+  v = (v | (v>>>8))   & 4278190335;
+  v = (v | (v>>>16))  & 0x3FF;
+  return (v<<22)>>22;
+}
+
+//Computes next combination in colexicographic order (this is mistakenly called nextPermutation on the bit twiddling hacks page)
+exports.nextCombination = function(v) {
+  var t = v | (v - 1);
+  return (t + 1) | (((~t & -~t) - 1) >>> (countTrailingZeros(v) + 1));
+}
+
+
+},{}],12:[function(require,module,exports){
+"use strict"; "use restrict";
+
+module.exports = UnionFind;
+
+function UnionFind(count) {
+  this.roots = new Array(count);
+  this.ranks = new Array(count);
+  
+  for(var i=0; i<count; ++i) {
+    this.roots[i] = i;
+    this.ranks[i] = 0;
+  }
+}
+
+var proto = UnionFind.prototype
+
+Object.defineProperty(proto, "length", {
+  "get": function() {
+    return this.roots.length
+  }
+})
+
+proto.makeSet = function() {
+  var n = this.roots.length;
+  this.roots.push(n);
+  this.ranks.push(0);
+  return n;
+}
+
+proto.find = function(x) {
+  var x0 = x
+  var roots = this.roots;
+  while(roots[x] !== x) {
+    x = roots[x]
+  }
+  while(roots[x0] !== x) {
+    var y = roots[x0]
+    roots[x0] = x
+    x0 = y
+  }
+  return x;
+}
+
+proto.link = function(x, y) {
+  var xr = this.find(x)
+    , yr = this.find(y);
+  if(xr === yr) {
+    return;
+  }
+  var ranks = this.ranks
+    , roots = this.roots
+    , xd    = ranks[xr]
+    , yd    = ranks[yr];
+  if(xd < yd) {
+    roots[xr] = yr;
+  } else if(yd < xd) {
+    roots[yr] = xr;
+  } else {
+    roots[yr] = xr;
+    ++ranks[xr];
+  }
+}
+},{}],13:[function(require,module,exports){
+"use strict"; "use restrict";
+
+var bits      = require("bit-twiddle")
+  , UnionFind = require("union-find")
+
+//Returns the dimension of a cell complex
+function dimension(cells) {
+  var d = 0
+    , max = Math.max
+  for(var i=0, il=cells.length; i<il; ++i) {
+    d = max(d, cells[i].length)
+  }
+  return d-1
+}
+exports.dimension = dimension
+
+//Counts the number of vertices in faces
+function countVertices(cells) {
+  var vc = -1
+    , max = Math.max
+  for(var i=0, il=cells.length; i<il; ++i) {
+    var c = cells[i]
+    for(var j=0, jl=c.length; j<jl; ++j) {
+      vc = max(vc, c[j])
+    }
+  }
+  return vc+1
+}
+exports.countVertices = countVertices
+
+//Returns a deep copy of cells
+function cloneCells(cells) {
+  var ncells = new Array(cells.length)
+  for(var i=0, il=cells.length; i<il; ++i) {
+    ncells[i] = cells[i].slice(0)
+  }
+  return ncells
+}
+exports.cloneCells = cloneCells
+
+//Ranks a pair of cells up to permutation
+function compareCells(a, b) {
+  var n = a.length
+    , t = a.length - b.length
+    , min = Math.min
+  if(t) {
+    return t
+  }
+  switch(n) {
+    case 0:
+      return 0;
+    case 1:
+      return a[0] - b[0];
+    case 2:
+      var d = a[0]+a[1]-b[0]-b[1]
+      if(d) {
+        return d
+      }
+      return min(a[0],a[1]) - min(b[0],b[1])
+    case 3:
+      var l1 = a[0]+a[1]
+        , m1 = b[0]+b[1]
+      d = l1+a[2] - (m1+b[2])
+      if(d) {
+        return d
+      }
+      var l0 = min(a[0], a[1])
+        , m0 = min(b[0], b[1])
+        , d  = min(l0, a[2]) - min(m0, b[2])
+      if(d) {
+        return d
+      }
+      return min(l0+a[2], l1) - min(m0+b[2], m1)
+    
+    //TODO: Maybe optimize n=4 as well?
+    
+    default:
+      var as = a.slice(0)
+      as.sort()
+      var bs = b.slice(0)
+      bs.sort()
+      for(var i=0; i<n; ++i) {
+        t = as[i] - bs[i]
+        if(t) {
+          return t
+        }
+      }
+      return 0
+  }
+}
+exports.compareCells = compareCells
+
+function compareZipped(a, b) {
+  return compareCells(a[0], b[0])
+}
+
+//Puts a cell complex into normal order for the purposes of findCell queries
+function normalize(cells, attr) {
+  if(attr) {
+    var len = cells.length
+    var zipped = new Array(len)
+    for(var i=0; i<len; ++i) {
+      zipped[i] = [cells[i], attr[i]]
+    }
+    zipped.sort(compareZipped)
+    for(var i=0; i<len; ++i) {
+      cells[i] = zipped[i][0]
+      attr[i] = zipped[i][1]
+    }
+    return cells
+  } else {
+    cells.sort(compareCells)
+    return cells
+  }
+}
+exports.normalize = normalize
+
+//Removes all duplicate cells in the complex
+function unique(cells) {
+  if(cells.length === 0) {
+    return []
+  }
+  var ptr = 1
+    , len = cells.length
+  for(var i=1; i<len; ++i) {
+    var a = cells[i]
+    if(compareCells(a, cells[i-1])) {
+      if(i === ptr) {
+        ptr++
+        continue
+      }
+      cells[ptr++] = a
+    }
+  }
+  cells.length = ptr
+  return cells
+}
+exports.unique = unique;
+
+//Finds a cell in a normalized cell complex
+function findCell(cells, c) {
+  var lo = 0
+    , hi = cells.length-1
+    , r  = -1
+  while (lo <= hi) {
+    var mid = (lo + hi) >> 1
+      , s   = compareCells(cells[mid], c)
+    if(s <= 0) {
+      if(s === 0) {
+        r = mid
+      }
+      lo = mid + 1
+    } else if(s > 0) {
+      hi = mid - 1
+    }
+  }
+  return r
+}
+exports.findCell = findCell;
+
+//Builds an index for an n-cell.  This is more general than dual, but less efficient
+function incidence(from_cells, to_cells) {
+  var index = new Array(from_cells.length)
+  for(var i=0, il=index.length; i<il; ++i) {
+    index[i] = []
+  }
+  var b = []
+  for(var i=0, n=to_cells.length; i<n; ++i) {
+    var c = to_cells[i]
+    var cl = c.length
+    for(var k=1, kn=(1<<cl); k<kn; ++k) {
+      b.length = bits.popCount(k)
+      var l = 0
+      for(var j=0; j<cl; ++j) {
+        if(k & (1<<j)) {
+          b[l++] = c[j]
+        }
+      }
+      var idx=findCell(from_cells, b)
+      if(idx < 0) {
+        continue
+      }
+      while(true) {
+        index[idx++].push(i)
+        if(idx >= from_cells.length || compareCells(from_cells[idx], b) !== 0) {
+          break
+        }
+      }
+    }
+  }
+  return index
+}
+exports.incidence = incidence
+
+//Computes the dual of the mesh.  This is basically an optimized version of buildIndex for the situation where from_cells is just the list of vertices
+function dual(cells, vertex_count) {
+  if(!vertex_count) {
+    return incidence(unique(skeleton(cells, 0)), cells, 0)
+  }
+  var res = new Array(vertex_count)
+  for(var i=0; i<vertex_count; ++i) {
+    res[i] = []
+  }
+  for(var i=0, len=cells.length; i<len; ++i) {
+    var c = cells[i]
+    for(var j=0, cl=c.length; j<cl; ++j) {
+      res[c[j]].push(i)
+    }
+  }
+  return res
+}
+exports.dual = dual
+
+//Enumerates all cells in the complex
+function explode(cells) {
+  var result = []
+  for(var i=0, il=cells.length; i<il; ++i) {
+    var c = cells[i]
+      , cl = c.length|0
+    for(var j=1, jl=(1<<cl); j<jl; ++j) {
+      var b = []
+      for(var k=0; k<cl; ++k) {
+        if((j >>> k) & 1) {
+          b.push(c[k])
+        }
+      }
+      result.push(b)
+    }
+  }
+  return normalize(result)
+}
+exports.explode = explode
+
+//Enumerates all of the n-cells of a cell complex
+function skeleton(cells, n) {
+  if(n < 0) {
+    return []
+  }
+  var result = []
+    , k0     = (1<<(n+1))-1
+  for(var i=0; i<cells.length; ++i) {
+    var c = cells[i]
+    for(var k=k0; k<(1<<c.length); k=bits.nextCombination(k)) {
+      var b = new Array(n+1)
+        , l = 0
+      for(var j=0; j<c.length; ++j) {
+        if(k & (1<<j)) {
+          b[l++] = c[j]
+        }
+      }
+      result.push(b)
+    }
+  }
+  return normalize(result)
+}
+exports.skeleton = skeleton;
+
+//Computes the boundary of all cells, does not remove duplicates
+function boundary(cells) {
+  var res = []
+  for(var i=0,il=cells.length; i<il; ++i) {
+    var c = cells[i]
+    for(var j=0,cl=c.length; j<cl; ++j) {
+      var b = new Array(c.length-1)
+      for(var k=0, l=0; k<cl; ++k) {
+        if(k !== j) {
+          b[l++] = c[k]
+        }
+      }
+      res.push(b)
+    }
+  }
+  return normalize(res)
+}
+exports.boundary = boundary;
+
+//Computes connected components for a dense cell complex
+function connectedComponents_dense(cells, vertex_count) {
+  var labels = new UnionFind(vertex_count)
+  for(var i=0; i<cells.length; ++i) {
+    var c = cells[i]
+    for(var j=0; j<c.length; ++j) {
+      for(var k=j+1; k<c.length; ++k) {
+        labels.link(c[j], c[k])
+      }
+    }
+  }
+  var components = []
+    , component_labels = labels.ranks
+  for(var i=0; i<component_labels.length; ++i) {
+    component_labels[i] = -1
+  }
+  for(var i=0; i<cells.length; ++i) {
+    var l = labels.find(cells[i][0])
+    if(component_labels[l] < 0) {
+      component_labels[l] = components.length
+      components.push([cells[i].slice(0)])
+    } else {
+      components[component_labels[l]].push(cells[i].slice(0))
+    }
+  }
+  return components
+}
+
+//Computes connected components for a sparse graph
+function connectedComponents_sparse(cells) {
+  var vertices  = unique(normalize(skeleton(cells, 0)))
+    , labels    = new UnionFind(vertices.length)
+  for(var i=0; i<cells.length; ++i) {
+    var c = cells[i]
+    for(var j=0; j<c.length; ++j) {
+      var vj = findCell(vertices, [c[j]])
+      for(var k=j+1; k<c.length; ++k) {
+        labels.link(vj, findCell(vertices, [c[k]]))
+      }
+    }
+  }
+  var components        = []
+    , component_labels  = labels.ranks
+  for(var i=0; i<component_labels.length; ++i) {
+    component_labels[i] = -1
+  }
+  for(var i=0; i<cells.length; ++i) {
+    var l = labels.find(findCell(vertices, [cells[i][0]]));
+    if(component_labels[l] < 0) {
+      component_labels[l] = components.length
+      components.push([cells[i].slice(0)])
+    } else {
+      components[component_labels[l]].push(cells[i].slice(0))
+    }
+  }
+  return components
+}
+
+//Computes connected components for a cell complex
+function connectedComponents(cells, vertex_count) {
+  if(vertex_count) {
+    return connectedComponents_dense(cells, vertex_count)
+  }
+  return connectedComponents_sparse(cells)
+}
+exports.connectedComponents = connectedComponents
+
+},{"bit-twiddle":11,"union-find":12}],14:[function(require,module,exports){
+"use strict"
+
+function unique_pred(list, compare) {
+  var ptr = 1
+    , len = list.length
+    , a=list[0], b=list[0]
+  for(var i=1; i<len; ++i) {
+    b = a
+    a = list[i]
+    if(compare(a, b)) {
+      if(i === ptr) {
+        ptr++
+        continue
+      }
+      list[ptr++] = a
+    }
+  }
+  list.length = ptr
+  return list
+}
+
+function unique_eq(list) {
+  var ptr = 1
+    , len = list.length
+    , a=list[0], b = list[0]
+  for(var i=1; i<len; ++i, b=a) {
+    b = a
+    a = list[i]
+    if(a !== b) {
+      if(i === ptr) {
+        ptr++
+        continue
+      }
+      list[ptr++] = a
+    }
+  }
+  list.length = ptr
+  return list
+}
+
+function unique(list, compare, sorted) {
+  if(list.length === 0) {
+    return list
+  }
+  if(compare) {
+    if(!sorted) {
+      list.sort(compare)
+    }
+    return unique_pred(list, compare)
+  }
+  if(!sorted) {
+    list.sort()
+  }
+  return unique_eq(list)
+}
+
+module.exports = unique
+
+},{}],15:[function(require,module,exports){
+"use strict"
+
+var ch = require("incremental-convex-hull")
+var uniq = require("uniq")
+
+module.exports = triangulate
+
+function LiftedPoint(p, i) {
+  this.point = p
+  this.index = i
+}
+
+function compareLifted(a, b) {
+  var ap = a.point
+  var bp = b.point
+  var d = ap.length
+  for(var i=0; i<d; ++i) {
+    var s = bp[i] - ap[i]
+    if(s) {
+      return s
+    }
+  }
+  return 0
+}
+
+function triangulate1D(n, points, includePointAtInfinity) {
+  if(n === 1) {
+    if(includePointAtInfinity) {
+      return [ [-1, 0] ]
+    } else {
+      return []
+    }
+  }
+  var lifted = points.map(function(p, i) {
+    return [ p[0], i ]
+  })
+  lifted.sort(function(a,b) {
+    return a[0] - b[0]
+  })
+  var cells = new Array(n - 1)
+  for(var i=1; i<n; ++i) {
+    var a = lifted[i-1]
+    var b = lifted[i]
+    cells[i-1] = [ a[1], b[1] ]
+  }
+  if(includePointAtInfinity) {
+    cells.push(
+      [ -1, cells[0][1], ],
+      [ cells[n-1][1], -1 ])
+  }
+  return cells
+}
+
+function triangulate(points, includePointAtInfinity) {
+  var n = points.length
+  if(n === 0) {
+    return []
+  }
+  
+  var d = points[0].length
+  if(d < 1) {
+    return []
+  }
+
+  //Special case:  For 1D we can just sort the points
+  if(d === 1) {
+    return triangulate1D(n, points, includePointAtInfinity)
+  }
+  
+  //Lift points, sort
+  var lifted = new Array(n)
+  var upper = 1.0
+  for(var i=0; i<n; ++i) {
+    var p = points[i]
+    var x = new Array(d+1)
+    var l = 0.0
+    for(var j=0; j<d; ++j) {
+      var v = p[j]
+      x[j] = v
+      l += v * v
+    }
+    x[d] = l
+    lifted[i] = new LiftedPoint(x, i)
+    upper = Math.max(l, upper)
+  }
+  uniq(lifted, compareLifted)
+  
+  //Double points
+  n = lifted.length
+
+  //Create new list of points
+  var dpoints = new Array(n + d + 1)
+  var dindex = new Array(n + d + 1)
+
+  //Add steiner points at top
+  var u = (d+1) * (d+1) * upper
+  var y = new Array(d+1)
+  for(var i=0; i<=d; ++i) {
+    y[i] = 0.0
+  }
+  y[d] = u
+
+  dpoints[0] = y.slice()
+  dindex[0] = -1
+
+  for(var i=0; i<=d; ++i) {
+    var x = y.slice()
+    x[i] = 1
+    dpoints[i+1] = x
+    dindex[i+1] = -1
+  }
+
+  //Copy rest of the points over
+  for(var i=0; i<n; ++i) {
+    var h = lifted[i]
+    dpoints[i + d + 1] = h.point
+    dindex[i + d + 1] =  h.index
+  }
+
+  //Construct convex hull
+  var hull = ch(dpoints, false)
+  if(includePointAtInfinity) {
+    hull = hull.filter(function(cell) {
+      var count = 0
+      for(var j=0; j<=d; ++j) {
+        var v = dindex[cell[j]]
+        if(v < 0) {
+          if(++count >= 2) {
+            return false
+          }
+        }
+        cell[j] = v
+      }
+      return true
+    })
+  } else {
+    hull = hull.filter(function(cell) {
+      for(var i=0; i<=d; ++i) {
+        var v = dindex[cell[i]]
+        if(v < 0) {
+          return false
+        }
+        cell[i] = v
+      }
+      return true
+    })
+  }
+
+  if(d & 1) {
+    for(var i=0; i<hull.length; ++i) {
+      var h = hull[i]
+      var x = h[0]
+      h[0] = h[1]
+      h[1] = x
+    }
+  }
+
+  return hull
+}
+},{"incremental-convex-hull":4,"uniq":14}],16:[function(require,module,exports){
+'use strict'
+
+module.exports = mouseListen
+
+var mouse = require('mouse-event')
+
+function mouseListen(element, callback) {
+
+  if(!callback) {
+    callback = element
+    element = window
+  }
+
+  var buttonState = 0
+  var x = 0
+  var y = 0
+  var mods = {
+    shift:   false,
+    alt:     false,
+    control: false,
+    meta:    false
+  }
+  var attached = false
+
+  function updateMods(ev) {
+    var changed = false
+    if('altKey' in ev) {
+      changed = changed || ev.altKey !== mods.alt
+      mods.alt = !!ev.altKey
+    }
+    if('shiftKey' in ev) {
+      changed = changed || ev.shiftKey !== mods.shift
+      mods.shift = !!ev.shiftKey
+    }
+    if('ctrlKey' in ev) {
+      changed = changed || ev.ctrlKey !== mods.control
+      mods.control = !!ev.ctrlKey
+    }
+    if('metaKey' in ev) {
+      changed = changed || ev.metaKey !== mods.meta
+      mods.meta = !!ev.metaKey
+    }
+    return changed
+  }
+
+  function handleEvent(nextButtons, ev) {
+    var nextX = mouse.x(ev)
+    var nextY = mouse.y(ev)
+    if('buttons' in ev) {
+      nextButtons = ev.buttons|0
+    }
+    if(nextButtons !== buttonState ||
+       nextX !== x ||
+       nextY !== y ||
+       updateMods(ev)) {
+      buttonState = nextButtons|0
+      x = nextX||0
+      y = nextY||0
+      callback(buttonState, x, y, mods)
+    }
+  }
+
+  function clearState(ev) {
+    handleEvent(0, ev)
+  }
+
+  function handleBlur() {
+    if(buttonState ||
+      x ||
+      y ||
+      mods.shift ||
+      mods.alt ||
+      mods.meta ||
+      mods.control) {
+
+      x = y = 0
+      buttonState = 0
+      mods.shift = mods.alt = mods.control = mods.meta = false
+      callback(0, 0, 0, mods)
+    }
+  }
+
+  function handleMods(ev) {
+    if(updateMods(ev)) {
+      callback(buttonState, x, y, mods)
+    }
+  }
+
+  function handleMouseMove(ev) {
+    if(mouse.buttons(ev) === 0) {
+      handleEvent(0, ev)
+    } else {
+      handleEvent(buttonState, ev)
+    }
+  }
+
+  function handleMouseDown(ev) {
+    handleEvent(buttonState | mouse.buttons(ev), ev)
+  }
+
+  function handleMouseUp(ev) {
+    handleEvent(buttonState & ~mouse.buttons(ev), ev)
+  }
+
+  function attachListeners() {
+    if(attached) {
+      return
+    }
+    attached = true
+
+    element.addEventListener('mousemove', handleMouseMove)
+
+    element.addEventListener('mousedown', handleMouseDown)
+
+    element.addEventListener('mouseup', handleMouseUp)
+
+    element.addEventListener('mouseleave', clearState)
+    element.addEventListener('mouseenter', clearState)
+    element.addEventListener('mouseout', clearState)
+    element.addEventListener('mouseover', clearState)
+
+    element.addEventListener('blur', handleBlur)
+
+    element.addEventListener('keyup', handleMods)
+    element.addEventListener('keydown', handleMods)
+    element.addEventListener('keypress', handleMods)
+
+    if(element !== window) {
+      window.addEventListener('blur', handleBlur)
+
+      window.addEventListener('keyup', handleMods)
+      window.addEventListener('keydown', handleMods)
+      window.addEventListener('keypress', handleMods)
+    }
+  }
+
+  function detachListeners() {
+    if(!attached) {
+      return
+    }
+    attached = false
+
+    element.removeEventListener('mousemove', handleMouseMove)
+
+    element.removeEventListener('mousedown', handleMouseDown)
+
+    element.removeEventListener('mouseup', handleMouseUp)
+
+    element.removeEventListener('mouseleave', clearState)
+    element.removeEventListener('mouseenter', clearState)
+    element.removeEventListener('mouseout', clearState)
+    element.removeEventListener('mouseover', clearState)
+
+    element.removeEventListener('blur', handleBlur)
+
+    element.removeEventListener('keyup', handleMods)
+    element.removeEventListener('keydown', handleMods)
+    element.removeEventListener('keypress', handleMods)
+
+    if(element !== window) {
+      window.removeEventListener('blur', handleBlur)
+
+      window.removeEventListener('keyup', handleMods)
+      window.removeEventListener('keydown', handleMods)
+      window.removeEventListener('keypress', handleMods)
+    }
+  }
+
+  //Attach listeners
+  attachListeners()
+
+  var result = {
+    element: element
+  }
+
+  Object.defineProperties(result, {
+    enabled: {
+      get: function() { return attached },
+      set: function(f) {
+        if(f) {
+          attachListeners()
+        } else {
+          detachListeners
+        }
+      },
+      enumerable: true
+    },
+    buttons: {
+      get: function() { return buttonState },
+      enumerable: true
+    },
+    x: {
+      get: function() { return x },
+      enumerable: true
+    },
+    y: {
+      get: function() { return y },
+      enumerable: true
+    },
+    mods: {
+      get: function() { return mods },
+      enumerable: true
+    }
+  })
+
+  return result
+}
+
+},{"mouse-event":17}],17:[function(require,module,exports){
+'use strict'
+
+function mouseButtons(ev) {
+  if(typeof ev === 'object') {
+    if('buttons' in ev) {
+      return ev.buttons
+    } else if('which' in ev) {
+      var b = ev.which
+      if(b === 2) {
+        return 4
+      } else if(b === 3) {
+        return 2
+      } else if(b > 0) {
+        return 1<<(b-1)
+      }
+    } else if('button' in ev) {
+      var b = ev.button
+      if(b === 1) {
+        return 4
+      } else if(b === 2) {
+        return 2
+      } else if(b >= 0) {
+        return 1<<b
+      }
+    }
+  }
+  return 0
+}
+exports.buttons = mouseButtons
+
+function mouseElement(ev) {
+  return ev.target || ev.srcElement || window
+}
+exports.element = mouseElement
+
+function mouseRelativeX(ev) {
+  if(typeof ev === 'object') {
+    if('offsetX' in ev) {
+      return ev.offsetX
+    }
+    var target = mouseElement(ev)
+    var bounds = target.getBoundingClientRect()
+    return ev.clientX - bounds.left
+  }
+  return 0
+}
+exports.x = mouseRelativeX
+
+function mouseRelativeY(ev) {
+  if(typeof ev === 'object') {
+    if('offsetY' in ev) {
+      return ev.offsetY
+    }
+    var target = mouseElement(ev)
+    var bounds = target.getBoundingClientRect()
+    return ev.clientY - bounds.top
+  }
+  return 0
+}
+exports.y = mouseRelativeY
+
+},{}],18:[function(require,module,exports){
+arguments[4][5][0].apply(exports,arguments)
+},{"dup":5}],19:[function(require,module,exports){
+arguments[4][6][0].apply(exports,arguments)
+},{"dup":6,"two-product":22,"two-sum":18}],20:[function(require,module,exports){
+arguments[4][7][0].apply(exports,arguments)
+},{"dup":7}],21:[function(require,module,exports){
+arguments[4][8][0].apply(exports,arguments)
+},{"dup":8}],22:[function(require,module,exports){
+arguments[4][9][0].apply(exports,arguments)
+},{"dup":9}],23:[function(require,module,exports){
+arguments[4][10][0].apply(exports,arguments)
+},{"dup":10,"robust-scale":19,"robust-subtract":20,"robust-sum":21,"two-product":22}],24:[function(require,module,exports){
+/*  Ported from Mukesh Prasad's public domain code:
+ *    http://tog.acm.org/resources/GraphicsGems/gemsii/xlines.c
+ *
+ *   This function computes whether two line segments,
+ *   respectively joining the input points (x1,y1) -- (x2,y2)
+ *   and the input points (x3,y3) -- (x4,y4) intersect.
+ *   If the lines intersect, the return value is an array
+ *   containing coordinates of the point of intersection.
+ *
+ *   Params
+ *        x1, y1,  x2, y2   Coordinates of endpoints of one segment.
+ *        x3, y3,  x4, y4   Coordinates of endpoints of other segment.
+ *
+ *   Also Accepts:
+ *    4 objects with the minimal object structure { x: .., y: ..}
+ *    4 arrays where [0] is x and [1] is y
+ *
+ *   The value returned by the function is one of:
+ *
+ *        undefined - no intersection
+ *        array     - intersection
+ *        true      - colinear
+ */
+
+function segseg(x1, y1, x2, y2, x3, y3, x4, y4) {
+
+  if (arguments.length === 4) {
+    var p1 = x1;
+    var p2 = y1;
+    var p3 = x2;
+    var p4 = y2;
+
+    // assume array [x, y]
+    if (p1.length && p1.length === 2) {
+      x1 = p1[0];
+      y1 = p1[1];
+      x2 = p2[0];
+      y2 = p2[1];
+      x3 = p3[0];
+      y3 = p3[1];
+      x4 = p4[0];
+      y4 = p4[1];
+
+    // assume object with obj.x and obj.y
+    } else {
+      x1 = p1.x;
+      y1 = p1.y;
+      x2 = p2.x;
+      y2 = p2.y;
+      x3 = p3.x;
+      y3 = p3.y;
+      x4 = p4.x;
+      y4 = p4.y;
+    }
+  }
+
+
+  var a1, a2, b1, b2, c1, c2; // Coefficients of line eqns.
+  var r1, r2, r3, r4;         // 'Sign' values
+  var denom, offset;          // Intermediate values
+  var x, y;                   // Intermediate return values
+
+  // Compute a1, b1, c1, where line joining points 1 and 2
+  // is "a1 x  +  b1 y  +  c1  =  0".
+  a1 = y2 - y1;
+  b1 = x1 - x2;
+  c1 = x2 * y1 - x1 * y2;
+
+  // Compute r3 and r4.
+  r3 = a1 * x3 + b1 * y3 + c1;
+  r4 = a1 * x4 + b1 * y4 + c1;
+
+  // Check signs of r3 and r4.  If both point 3 and point 4 lie on
+  // same side of line 1, the line segments do not intersect.
+  if ( r3 !== 0 && r4 !== 0 && ((r3 >= 0 && r4 >= 0) || (r3 < 0 && r4 < 0))) {
+    return; // no intersection
+  }
+
+
+  // Compute a2, b2, c2
+  a2 = y4 - y3;
+  b2 = x3 - x4;
+  c2 = x4 * y3 - x3 * y4;
+
+  // Compute r1 and r2
+  r1 = a2 * x1 + b2 * y1 + c2;
+  r2 = a2 * x2 + b2 * y2 + c2;
+
+  // Check signs of r1 and r2.  If both point 1 and point 2 lie
+  // on same side of second line segment, the line segments do
+  // not intersect.
+  if (r1 !== 0 && r2 !== 0 && ((r1 >= 0 && r2 >= 0) || (r1 < 0 && r2 < 0))) {
+    return; // no intersections
+  }
+
+  // Line segments intersect: compute intersection point.
+  denom = a1 * b2 - a2 * b1;
+
+  if ( denom === 0 ) {
+    return true;
+  }
+
+  offset = denom < 0 ? - denom / 2 : denom / 2;
+
+  x = b1 * c2 - b2 * c1;
+  y = a2 * c1 - a1 * c2;
+
+  return [
+    ( x < 0 ? x : x ) / denom,
+    ( y < 0 ? y : y ) / denom,
+  ];
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = segseg;
+}
+
+if (typeof window !== 'undefined') {
+  window.segseg = window.segseg || segseg;
+}
+
+},{}],25:[function(require,module,exports){
+;(function inject(clean, precision, undef) {
+
+  var isArray = function (a) {
+    return Object.prototype.toString.call(a) === "[object Array]";
+  };
+
+  function Vec2(x, y) {
+    if (!(this instanceof Vec2)) {
+      return new Vec2(x, y);
+    }
+
+    if (isArray(x)) {
+      y = x[1];
+      x = x[0];
+    } else if('object' === typeof x && x) {
+      y = x.y;
+      x = x.x;
+    }
+
+    this.x = Vec2.clean(x || 0);
+    this.y = Vec2.clean(y || 0);
+  }
+
+  Vec2.prototype = {
+    change : function(fn) {
+      if (typeof fn === 'function') {
+        if (this.observers) {
+          this.observers.push(fn);
+        } else {
+          this.observers = [fn];
+        }
+      } else if (this.observers && this.observers.length) {
+        for (var i=this.observers.length-1; i>=0; i--) {
+          this.observers[i](this, fn);
+        }
+      }
+
+      return this;
+    },
+
+    ignore : function(fn) {
+      if (this.observers) {
+        if (!fn) {
+          this.observers = [];
+        } else {
+          var o = this.observers, l = o.length;
+          while(l--) {
+            o[l] === fn && o.splice(l, 1);
+          }
+        }
+      }
+      return this;
+    },
+
+    // set x and y
+    set: function(x, y, silent) {
+      if('number' != typeof x) {
+        silent = y;
+        y = x.y;
+        x = x.x;
+      }
+
+      if(this.x === x && this.y === y) {
+        return this;
+      }
+
+      var orig = null;
+      if (this.observers && this.observers.length) {
+        orig = this.clone();
+      }
+
+      this.x = Vec2.clean(x);
+      this.y = Vec2.clean(y);
+
+      if(silent !== false) {
+        return this.change(orig);
+      }
+    },
+
+    // reset x and y to zero
+    zero : function() {
+      return this.set(0, 0);
+    },
+
+    // return a new vector with the same component values
+    // as this one
+    clone : function() {
+      return new (this.constructor)(this.x, this.y);
+    },
+
+    // negate the values of this vector
+    negate : function(returnNew) {
+      if (returnNew) {
+        return new (this.constructor)(-this.x, -this.y);
+      } else {
+        return this.set(-this.x, -this.y);
+      }
+    },
+
+    // Add the incoming `vec2` vector to this vector
+    add : function(vec2, returnNew) {
+      if (!returnNew) {
+        this.x += vec2.x; this.y += vec2.y;
+        return this.change();
+      } else {
+        // Return a new vector if `returnNew` is truthy
+        return new (this.constructor)(
+          this.x + vec2.x,
+          this.y + vec2.y
+        );
+      }
+    },
+
+    // Subtract the incoming `vec2` from this vector
+    subtract : function(vec2, returnNew) {
+      if (!returnNew) {
+        this.x -= vec2.x; this.y -= vec2.y;
+        return this.change();
+      } else {
+        // Return a new vector if `returnNew` is truthy
+        return new (this.constructor)(
+          this.x - vec2.x,
+          this.y - vec2.y
+        );
+      }
+    },
+
+    // Multiply this vector by the incoming `vec2`
+    multiply : function(vec2, returnNew) {
+      var x,y;
+      if ('number' !== typeof vec2) { //.x !== undef) {
+        x = vec2.x;
+        y = vec2.y;
+
+      // Handle incoming scalars
+      } else {
+        x = y = vec2;
+      }
+
+      if (!returnNew) {
+        return this.set(this.x * x, this.y * y);
+      } else {
+        return new (this.constructor)(
+          this.x * x,
+          this.y * y
+        );
+      }
+    },
+
+    // Rotate this vector. Accepts a `Rotation` or angle in radians.
+    //
+    // Passing a truthy `inverse` will cause the rotation to
+    // be reversed.
+    //
+    // If `returnNew` is truthy, a new
+    // `Vec2` will be created with the values resulting from
+    // the rotation. Otherwise the rotation will be applied
+    // to this vector directly, and this vector will be returned.
+    rotate : function(r, inverse, returnNew) {
+      var
+      x = this.x,
+      y = this.y,
+      cos = Math.cos(r),
+      sin = Math.sin(r),
+      rx, ry;
+
+      inverse = (inverse) ? -1 : 1;
+
+      rx = cos * x - (inverse * sin) * y;
+      ry = (inverse * sin) * x + cos * y;
+
+      if (returnNew) {
+        return new (this.constructor)(rx, ry);
+      } else {
+        return this.set(rx, ry);
+      }
+    },
+
+    // Calculate the length of this vector
+    length : function() {
+      var x = this.x, y = this.y;
+      return Math.sqrt(x * x + y * y);
+    },
+
+    // Get the length squared. For performance, use this instead of `Vec2#length` (if possible).
+    lengthSquared : function() {
+      var x = this.x, y = this.y;
+      return x*x+y*y;
+    },
+
+    // Return the distance betwen this `Vec2` and the incoming vec2 vector
+    // and return a scalar
+    distance : function(vec2) {
+      var x = this.x - vec2.x;
+      var y = this.y - vec2.y;
+      return Math.sqrt(x*x + y*y);
+    },
+
+    // Convert this vector into a unit vector.
+    // Returns the length.
+    normalize : function(returnNew) {
+      var length = this.length();
+
+      // Collect a ratio to shrink the x and y coords
+      var invertedLength = (length < Number.MIN_VALUE) ? 0 : 1/length;
+
+      if (!returnNew) {
+        // Convert the coords to be greater than zero
+        // but smaller than or equal to 1.0
+        return this.set(this.x * invertedLength, this.y * invertedLength);
+      } else {
+        return new (this.constructor)(this.x * invertedLength, this.y * invertedLength);
+      }
+    },
+
+    // Determine if another `Vec2`'s components match this one's
+    // also accepts 2 scalars
+    equal : function(v, w) {
+      if (w === undef) {
+        w = v.y;
+        v = v.x;
+      }
+
+      return (Vec2.clean(v) === this.x && Vec2.clean(w) === this.y);
+    },
+
+    // Return a new `Vec2` that contains the absolute value of
+    // each of this vector's parts
+    abs : function(returnNew) {
+      var x = Math.abs(this.x), y = Math.abs(this.y);
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Return a new `Vec2` consisting of the smallest values
+    // from this vector and the incoming
+    //
+    // When returnNew is truthy, a new `Vec2` will be returned
+    // otherwise the minimum values in either this or `v` will
+    // be applied to this vector.
+    min : function(v, returnNew) {
+      var
+      tx = this.x,
+      ty = this.y,
+      vx = v.x,
+      vy = v.y,
+      x = tx < vx ? tx : vx,
+      y = ty < vy ? ty : vy;
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Return a new `Vec2` consisting of the largest values
+    // from this vector and the incoming
+    //
+    // When returnNew is truthy, a new `Vec2` will be returned
+    // otherwise the minimum values in either this or `v` will
+    // be applied to this vector.
+    max : function(v, returnNew) {
+      var
+      tx = this.x,
+      ty = this.y,
+      vx = v.x,
+      vy = v.y,
+      x = tx > vx ? tx : vx,
+      y = ty > vy ? ty : vy;
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Clamp values into a range.
+    // If this vector's values are lower than the `low`'s
+    // values, then raise them.  If they are higher than
+    // `high`'s then lower them.
+    //
+    // Passing returnNew as true will cause a new Vec2 to be
+    // returned.  Otherwise, this vector's values will be clamped
+    clamp : function(low, high, returnNew) {
+      var ret = this.min(high, true).max(low);
+      if (returnNew) {
+        return ret;
+      } else {
+        return this.set(ret.x, ret.y);
+      }
+    },
+
+    // Perform linear interpolation between two vectors
+    // amount is a decimal between 0 and 1
+    lerp : function(vec, amount, returnNew) {
+      return this.add(vec.subtract(this, true).multiply(amount), returnNew);
+    },
+
+    // Get the skew vector such that dot(skew_vec, other) == cross(vec, other)
+    skew : function() {
+      // Returns a new vector.
+      return new (this.constructor)(-this.y, this.x);
+    },
+
+    // calculate the dot product between
+    // this vector and the incoming
+    dot : function(b) {
+      return Vec2.clean(this.x * b.x + b.y * this.y);
+    },
+
+    // calculate the perpendicular dot product between
+    // this vector and the incoming
+    perpDot : function(b) {
+      return Vec2.clean(this.x * b.y - this.y * b.x);
+    },
+
+    // Determine the angle between two vec2s
+    angleTo : function(vec) {
+      return Math.atan2(this.perpDot(vec), this.dot(vec));
+    },
+
+    // Divide this vector's components by a scalar
+    divide : function(vec2, returnNew) {
+      var x,y;
+      if ('number' !== typeof vec2) {
+        x = vec2.x;
+        y = vec2.y;
+
+      // Handle incoming scalars
+      } else {
+        x = y = vec2;
+      }
+
+      if (x === 0 || y === 0) {
+        throw new Error('division by zero')
+      }
+
+      if (isNaN(x) || isNaN(y)) {
+        throw new Error('NaN detected');
+      }
+
+      if (returnNew) {
+        return new (this.constructor)(this.x / x, this.y / y);
+      }
+
+      return this.set(this.x / x, this.y / y);
+    },
+
+    isPointOnLine : function(start, end) {
+      return (start.y - this.y) * (start.x - end.x) ===
+             (start.y - end.y) * (start.x - this.x);
+    },
+
+    toArray: function() {
+      return [this.x, this.y];
+    },
+
+    fromArray: function(array) {
+      return this.set(array[0], array[1]);
+    },
+    toJSON: function () {
+      return {x: this.x, y: this.y};
+    },
+    toString: function() {
+      return '(' + this.x + ', ' + this.y + ')';
+    },
+    constructor : Vec2
+  };
+
+  Vec2.fromArray = function(array, ctor) {
+    return new (ctor || Vec2)(array[0], array[1]);
+  };
+
+  // Floating point stability
+  Vec2.precision = precision || 8;
+  var p = Math.pow(10, Vec2.precision);
+
+  Vec2.clean = clean || function(val) {
+    if (isNaN(val)) {
+      throw new Error('NaN detected');
+    }
+
+    if (!isFinite(val)) {
+      throw new Error('Infinity detected');
+    }
+
+    if(Math.round(val) === val) {
+      return val;
+    }
+
+    return Math.round(val * p)/p;
+  };
+
+  Vec2.inject = inject;
+
+  if(!clean) {
+    Vec2.fast = inject(function (k) { return k; });
+
+    // Expose, but also allow creating a fresh Vec2 subclass.
+    if (typeof module !== 'undefined' && typeof module.exports == 'object') {
+      module.exports = Vec2;
+    } else {
+      window.Vec2 = window.Vec2 || Vec2;
+    }
+  }
+  return Vec2;
+})();
+
+},{}],26:[function(require,module,exports){
+if (typeof require !== 'undefined') {
+  var Vec2 = require('vec2');
+  var segseg = require('segseg');
+}
+
+
+function Segment2(start, end) {
+  if (!(this instanceof Segment2)) {
+    return new Segment2(start, end);
+  }
+
+  this.start = start || new Vec2();
+  this.end = end || new Vec2();
+
+  this.start.change(this.notify.bind(this));
+  this.end.change(this.notify.bind(this));
+
+  this._listeners = [];
+}
+
+
+Segment2.prototype.constructor = Segment2;
+
+Segment2.prototype.change = function(fn) {
+  this._listeners.push(fn);
+  return fn;
+};
+
+Segment2.prototype.ignore = function(fn) {
+
+  if (!fn) {
+    this._listeners = [];
+  } else {
+    this._listeners = this._listeners.filter(function(a) {
+      return a !== fn;
+    });
+  }
+
+};
+
+Segment2.prototype.notify = function(vec) {
+  var fns = this._listeners, l = fns.length;
+  for (var i=0; i<l; i++) {
+    fns[i](this, vec);
+  }
+};
+
+Segment2.prototype.clone = function() {
+  return new (this.constructor)(
+    new (this.start.constructor)(this.start.x, this.start.y),
+    new (this.end.constructor)(this.end.x, this.end.y)
+  );
+};
+
+Segment2.prototype.equal = function(seg) {
+  if (!seg || !seg.start || !seg.end) {
+    return false;
+  }
+
+  return seg.start.equal(this.start) && seg.end.equal(this.end);
+};
+
+Segment2.prototype.length = function() {
+  return this.start.distance(this.end);
+};
+
+Segment2.prototype.lengthSquared = function() {
+  return this.start.subtract(this.end).lengthSquared();
+};
+
+Segment2.prototype.closestPointTo = function(vec) {
+  var a = this.start;
+  var b = this.end;
+  var ab = b.subtract(a, true);
+  var veca = vec.subtract(a, true);
+  var vecadot = veca.dot(ab);
+  var abdot = ab.dot(ab);
+
+  var t = Math.min(Math.max(vecadot/abdot, 0), 1);
+
+  if (isNaN(t)) {
+    t = 0;
+  }
+
+  var point = ab.multiply(t).add(a);
+  var length = vec.subtract(point, true).lengthSquared();
+
+  return point;
+};
+
+Segment2.prototype.containsPoint = function(vec) {
+
+  var s = this.start, e = this.end;
+  var dx = (s.x <= vec.x && e.x >= vec.x) || (s.x >= vec.x && e.x <= vec.x);
+  var dy = (s.y <= vec.y && e.y >= vec.y) || (s.y >= vec.y && e.y <= vec.y);
+  if (dx && dy) {
+    var a =  ((e.x - s.x) * (vec.y - s.y)) - ((vec.x - s.x) * (e.y - s.y));
+    return Vec2.clean(a) === 0;
+  }
+
+  return false;
+};
+
+Segment2.prototype.midpoint = function() {
+  return this.start.subtract(this.end, true).divide(2).add(this.end);
+};
+
+Segment2.prototype.slope = function() {
+  var dy = this.end.y - this.start.y;
+  var dx = this.end.x - this.start.x;
+
+  if (!dx) {
+    return Infinity;
+  }
+
+  return Vec2.clean(dy/dx);
+};
+
+Segment2.prototype.rotate = function(rads, origin, returnNew) {
+
+  if (origin === true) {
+    returnNew = true;
+    origin = null;
+  }
+
+  if (!origin) {
+    origin = this.midpoint();
+  }
+
+  var start = this.start.subtract(origin, true).rotate(rads);
+  var end = this.end.subtract(origin, true).rotate(rads);
+
+  start.add(origin);
+  end.add(origin);
+
+  if (returnNew) {
+    return new Segment2(start, end);
+  } else {
+    this.start.set(start.x, start.y);
+    this.end.set(end.x, end.y);
+    return this;
+  }
+};
+
+Segment2.prototype.intersect = function(seg) {
+  if (!seg || !seg.start || !seg.end) {
+    return false;
+  }
+
+  var isect = segseg(this.start, this.end, seg.start, seg.end);
+  if (!isect || isect === true) {
+    return isect;
+  } else {
+    return Vec2.fromArray(isect);
+  }
+};
+
+Segment2.prototype.collinear = function(seg) {
+  var s = this.start.perpDot(seg.end);
+  var e = this.end.perpDot(seg.start);
+  return s-e === 0;
+};
+
+Segment2.prototype.parallel = function(seg) {
+  return this.start.subtract(this.end, true).abs().normalize().equal(
+    seg.start.subtract(seg.end, true).abs().normalize()
+  );
+}
+
+if (typeof module !== "undefined" && typeof module.exports == "object") {
+  module.exports = Segment2;
+}
+
+if (typeof window !== "undefined") {
+  window.Segment2 = window.Segment2 || Segment2;
+}
+
+
+},{"segseg":24,"vec2":25}],27:[function(require,module,exports){
+;(function inject(clean, precision, undef) {
+
+  var isArray = function (a) {
+    return Object.prototype.toString.call(a) === "[object Array]";
+  };
+
+  var defined = function(a) {
+    return a !== undef;
+  };
+
+  function Vec2(x, y) {
+    if (!(this instanceof Vec2)) {
+      return new Vec2(x, y);
+    }
+
+    if (isArray(x)) {
+      y = x[1];
+      x = x[0];
+    } else if('object' === typeof x && x) {
+      y = x.y;
+      x = x.x;
+    }
+
+    this.x = Vec2.clean(x || 0);
+    this.y = Vec2.clean(y || 0);
+  }
+
+  Vec2.prototype = {
+    change : function(fn) {
+      if (typeof fn === 'function') {
+        if (this.observers) {
+          this.observers.push(fn);
+        } else {
+          this.observers = [fn];
+        }
+      } else if (this.observers && this.observers.length) {
+        for (var i=this.observers.length-1; i>=0; i--) {
+          this.observers[i](this, fn);
+        }
+      }
+
+      return this;
+    },
+
+    ignore : function(fn) {
+      if (this.observers) {
+        if (!fn) {
+          this.observers = [];
+        } else {
+          var o = this.observers, l = o.length;
+          while(l--) {
+            o[l] === fn && o.splice(l, 1);
+          }
+        }
+      }
+      return this;
+    },
+
+    // set x and y
+    set: function(x, y, notify) {
+      if('number' != typeof x) {
+        notify = y;
+        y = x.y;
+        x = x.x;
+      }
+
+      if(this.x === x && this.y === y) {
+        return this;
+      }
+
+      var orig = null;
+      if (notify !== false && this.observers && this.observers.length) {
+        orig = this.clone();
+      }
+
+      this.x = Vec2.clean(x);
+      this.y = Vec2.clean(y);
+
+      if(notify !== false) {
+        return this.change(orig);
+      }
+    },
+
+    // reset x and y to zero
+    zero : function() {
+      return this.set(0, 0);
+    },
+
+    // return a new vector with the same component values
+    // as this one
+    clone : function() {
+      return new (this.constructor)(this.x, this.y);
+    },
+
+    // negate the values of this vector
+    negate : function(returnNew) {
+      if (returnNew) {
+        return new (this.constructor)(-this.x, -this.y);
+      } else {
+        return this.set(-this.x, -this.y);
+      }
+    },
+
+    // Add the incoming `vec2` vector to this vector
+    add : function(x, y, returnNew) {
+
+      if (typeof x != 'number') {
+        returnNew = y;
+        if (isArray(x)) {
+          y = x[1];
+          x = x[0];
+        } else {
+          y = x.y;
+          x = x.x;
+        }
+      }
+
+      x += this.x;
+      y += this.y;
+
+
+      if (!returnNew) {
+        return this.set(x, y);
+      } else {
+        // Return a new vector if `returnNew` is truthy
+        return new (this.constructor)(x, y);
+      }
+    },
+
+    // Subtract the incoming `vec2` from this vector
+    subtract : function(x, y, returnNew) {
+      if (typeof x != 'number') {
+        returnNew = y;
+        if (isArray(x)) {
+          y = x[1];
+          x = x[0];
+        } else {
+          y = x.y;
+          x = x.x;
+        }
+      }
+
+      x = this.x - x;
+      y = this.y - y;
+
+      if (!returnNew) {
+        return this.set(x, y);
+      } else {
+        // Return a new vector if `returnNew` is truthy
+        return new (this.constructor)(x, y);
+      }
+    },
+
+    // Multiply this vector by the incoming `vec2`
+    multiply : function(x, y, returnNew) {
+      if (typeof x != 'number') {
+        returnNew = y;
+        if (isArray(x)) {
+          y = x[1];
+          x = x[0];
+        } else {
+          y = x.y;
+          x = x.x;
+        }
+      } else if (typeof y != 'number') {
+        returnNew = y;
+        y = x;
+      }
+
+      x *= this.x;
+      y *= this.y;
+
+      if (!returnNew) {
+        return this.set(x, y);
+      } else {
+        return new (this.constructor)(x, y);
+      }
+    },
+
+    // Rotate this vector. Accepts a `Rotation` or angle in radians.
+    //
+    // Passing a truthy `inverse` will cause the rotation to
+    // be reversed.
+    //
+    // If `returnNew` is truthy, a new
+    // `Vec2` will be created with the values resulting from
+    // the rotation. Otherwise the rotation will be applied
+    // to this vector directly, and this vector will be returned.
+    rotate : function(r, inverse, returnNew) {
+      var
+      x = this.x,
+      y = this.y,
+      cos = Math.cos(r),
+      sin = Math.sin(r),
+      rx, ry;
+
+      inverse = (inverse) ? -1 : 1;
+
+      rx = cos * x - (inverse * sin) * y;
+      ry = (inverse * sin) * x + cos * y;
+
+      if (returnNew) {
+        return new (this.constructor)(rx, ry);
+      } else {
+        return this.set(rx, ry);
+      }
+    },
+
+    // Calculate the length of this vector
+    length : function() {
+      var x = this.x, y = this.y;
+      return Math.sqrt(x * x + y * y);
+    },
+
+    // Get the length squared. For performance, use this instead of `Vec2#length` (if possible).
+    lengthSquared : function() {
+      var x = this.x, y = this.y;
+      return x*x+y*y;
+    },
+
+    // Return the distance betwen this `Vec2` and the incoming vec2 vector
+    // and return a scalar
+    distance : function(vec2) {
+      var x = this.x - vec2.x;
+      var y = this.y - vec2.y;
+      return Math.sqrt(x*x + y*y);
+    },
+
+    // Given Array of Vec2, find closest to this Vec2.
+    nearest : function(others) {
+      var
+      shortestDistance = Number.MAX_VALUE,
+      nearest = null,
+      currentDistance;
+
+      for (var i = others.length - 1; i >= 0; i--) {
+        currentDistance = this.distance(others[i]);
+        if (currentDistance <= shortestDistance) {
+          shortestDistance = currentDistance;
+          nearest = others[i];
+        }
+      }
+
+      return nearest;
+    },
+
+    // Convert this vector into a unit vector.
+    // Returns the length.
+    normalize : function(returnNew) {
+      var length = this.length();
+
+      // Collect a ratio to shrink the x and y coords
+      var invertedLength = (length < Number.MIN_VALUE) ? 0 : 1/length;
+
+      if (!returnNew) {
+        // Convert the coords to be greater than zero
+        // but smaller than or equal to 1.0
+        return this.set(this.x * invertedLength, this.y * invertedLength);
+      } else {
+        return new (this.constructor)(this.x * invertedLength, this.y * invertedLength);
+      }
+    },
+
+    // Determine if another `Vec2`'s components match this one's
+    // also accepts 2 scalars
+    equal : function(v, w) {
+      if (typeof v != 'number') {
+        if (isArray(v)) {
+          w = v[1];
+          v = v[0];
+        } else {
+          w = v.y;
+          v = v.x;
+        }
+      }
+
+      return (Vec2.clean(v) === this.x && Vec2.clean(w) === this.y);
+    },
+
+    // Return a new `Vec2` that contains the absolute value of
+    // each of this vector's parts
+    abs : function(returnNew) {
+      var x = Math.abs(this.x), y = Math.abs(this.y);
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Return a new `Vec2` consisting of the smallest values
+    // from this vector and the incoming
+    //
+    // When returnNew is truthy, a new `Vec2` will be returned
+    // otherwise the minimum values in either this or `v` will
+    // be applied to this vector.
+    min : function(v, returnNew) {
+      var
+      tx = this.x,
+      ty = this.y,
+      vx = v.x,
+      vy = v.y,
+      x = tx < vx ? tx : vx,
+      y = ty < vy ? ty : vy;
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Return a new `Vec2` consisting of the largest values
+    // from this vector and the incoming
+    //
+    // When returnNew is truthy, a new `Vec2` will be returned
+    // otherwise the minimum values in either this or `v` will
+    // be applied to this vector.
+    max : function(v, returnNew) {
+      var
+      tx = this.x,
+      ty = this.y,
+      vx = v.x,
+      vy = v.y,
+      x = tx > vx ? tx : vx,
+      y = ty > vy ? ty : vy;
+
+      if (returnNew) {
+        return new (this.constructor)(x, y);
+      } else {
+        return this.set(x, y);
+      }
+    },
+
+    // Clamp values into a range.
+    // If this vector's values are lower than the `low`'s
+    // values, then raise them.  If they are higher than
+    // `high`'s then lower them.
+    //
+    // Passing returnNew as true will cause a new Vec2 to be
+    // returned.  Otherwise, this vector's values will be clamped
+    clamp : function(low, high, returnNew) {
+      var ret = this.min(high, true).max(low);
+      if (returnNew) {
+        return ret;
+      } else {
+        return this.set(ret.x, ret.y);
+      }
+    },
+
+    // Perform linear interpolation between two vectors
+    // amount is a decimal between 0 and 1
+    lerp : function(vec, amount, returnNew) {
+      return this.add(vec.subtract(this, true).multiply(amount), returnNew);
+    },
+
+    // Get the skew vector such that dot(skew_vec, other) == cross(vec, other)
+    skew : function(returnNew) {
+      if (!returnNew) {
+        return this.set(-this.y, this.x)
+      } else {
+        return new (this.constructor)(-this.y, this.x);
+      }
+    },
+
+    // calculate the dot product between
+    // this vector and the incoming
+    dot : function(b) {
+      return Vec2.clean(this.x * b.x + b.y * this.y);
+    },
+
+    // calculate the perpendicular dot product between
+    // this vector and the incoming
+    perpDot : function(b) {
+      return Vec2.clean(this.x * b.y - this.y * b.x);
+    },
+
+    // Determine the angle between two vec2s
+    angleTo : function(vec) {
+      return Math.atan2(this.perpDot(vec), this.dot(vec));
+    },
+
+    // Divide this vector's components by a scalar
+    divide : function(x, y, returnNew) {
+      if (typeof x != 'number') {
+        returnNew = y;
+        if (isArray(x)) {
+          y = x[1];
+          x = x[0];
+        } else {
+          y = x.y;
+          x = x.x;
+        }
+      } else if (typeof y != 'number') {
+        returnNew = y;
+        y = x;
+      }
+
+      if (x === 0 || y === 0) {
+        throw new Error('division by zero')
+      }
+
+      if (isNaN(x) || isNaN(y)) {
+        throw new Error('NaN detected');
+      }
+
+      if (returnNew) {
+        return new (this.constructor)(this.x / x, this.y / y);
+      }
+
+      return this.set(this.x / x, this.y / y);
+    },
+
+    isPointOnLine : function(start, end) {
+      return (start.y - this.y) * (start.x - end.x) ===
+             (start.y - end.y) * (start.x - this.x);
+    },
+
+    toArray: function() {
+      return [this.x, this.y];
+    },
+
+    fromArray: function(array) {
+      return this.set(array[0], array[1]);
+    },
+    toJSON: function () {
+      return {x: this.x, y: this.y};
+    },
+    toString: function() {
+      return '(' + this.x + ', ' + this.y + ')';
+    },
+    constructor : Vec2
+  };
+
+  Vec2.fromArray = function(array, ctor) {
+    return new (ctor || Vec2)(array[0], array[1]);
+  };
+
+  // Floating point stability
+  Vec2.precision = precision || 8;
+  var p = Math.pow(10, Vec2.precision);
+
+  Vec2.clean = clean || function(val) {
+    if (isNaN(val)) {
+      throw new Error('NaN detected');
+    }
+
+    if (!isFinite(val)) {
+      throw new Error('Infinity detected');
+    }
+
+    if(Math.round(val) === val) {
+      return val;
+    }
+
+    return Math.round(val * p)/p;
+  };
+
+  Vec2.inject = inject;
+
+  if(!clean) {
+    Vec2.fast = inject(function (k) { return k; });
+
+    // Expose, but also allow creating a fresh Vec2 subclass.
+    if (typeof module !== 'undefined' && typeof module.exports == 'object') {
+      module.exports = Vec2;
+    } else {
+      window.Vec2 = window.Vec2 || Vec2;
+    }
+  }
+  return Vec2;
+})();
+
+},{}],28:[function(require,module,exports){
+'use strict'
+
+var orient = require('robust-orientation')
+var vec2 = require('vec2')
+var segment2 = require('segment2')
+var mouseChange = require('mouse-change')
+var fit = require('canvas-fit')
+var delaunay = require('delaunay-triangulate')
+var createTriangulation = require('../lib/triangulation')
+
+//Create canvas and context
+var canvas = document.createElement('canvas')
+var context = canvas.getContext('2d')
+document.body.appendChild(canvas)
+window.addEventListener('resize', fit(canvas), false)
+
+var points = []
+for(var i=0; i<40; ++i) {
+  points.push([Math.random(), Math.random()])
+}
+
+var triangulation = createTriangulation(points.length)
+delaunay(points).forEach(function(cell) {
+    triangulation.addTriangle(cell[0], cell[1], cell[2])
+})
+
+var closestEdge = null
+
+function distance(a, b, c) {
+  var p = vec2(c[0], c[1])
+  return segment2(vec2(a[0], a[1]), vec2(b[0], b[1])).closestPointTo(p).distance(p)
+}
+
+var lastButtons = 0
+mouseChange(canvas, function(buttons, x, y) {
+  if(!lastButtons && buttons && closestEdge) {
+    triangulation.flip(closestEdge[0], closestEdge[1])
+  }
+
+  var edges = triangulation.edges()
+  var p = [x / canvas.width, y / canvas.height]
+  var closestDistance = 0.1
+  closestEdge = null
+  for(var i=0; i<edges.length; ++i) {
+    var e = edges[i]
+    var a = points[e[0]]
+    var b = points[e[1]]
+    var d2 = distance(a, b, p)
+    if(d2 < closestDistance && orient(a, b, p) > 0) {
+      closestDistance = d2
+      closestEdge = e
+    }
+  }
+})
+
+function line(x0, y0, x1, y1) {
+  var w = canvas.width
+  var h = canvas.height
+  context.beginPath()
+  context.moveTo(w*x0, h*y0)
+  context.lineTo(w*x1, h*y1)
+  context.stroke()
+}
+
+function circle(x, y, r) {
+  var w = canvas.width
+  var h = canvas.height
+  context.beginPath()
+  context.moveTo(w*x, y*h)
+  context.arc(w*x, h*y, r, 0.0, 2.0*Math.PI)
+  context.fill()
+}
+
+var CW_ARROW = '⟳'
+var CCW_ARROW = '⟲'
+
+function drawSpiral(a, b, c) {
+  var w = canvas.width
+  var h = canvas.height
+  var x = w * (a[0] + b[0] + c[0]) / 3.0
+  var y = h * (a[1] + b[1] + c[1]) / 3.0
+  context.font = Math.ceil(Math.min(w, h)*0.025) + 'px Verdana'
+  if(orient(a, b, c) > 0) {
+    context.fillText(CW_ARROW, x, y)
+  } else {
+    context.fillText(CCW_ARROW, x, y)
+  }
+}
+
+function draw() {
+  requestAnimationFrame(draw)
+
+  var w = canvas.width
+  var h = canvas.height
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, w, h)
+
+  var edges = triangulation.edges()
+  for(var i=0; i<edges.length; ++i) {
+    var e = edges[i]
+    var a = points[e[0]]
+    var b = points[e[1]]
+    if( closestEdge &&
+       ((e[0] === closestEdge[0] && e[1] === closestEdge[1]) ||
+        (e[1] === closestEdge[0] && e[0] === closestEdge[1]))) {
+      context.strokeStyle = '#f00'
+    } else {
+      context.strokeStyle = '#000'
+    }
+    line(a[0], a[1], b[0], b[1])
+  }
+
+  var ca = -1, cb = -1, cs = -1, ct = -1
+
+  if(closestEdge) {
+    ca = closestEdge[0]
+    cb = closestEdge[1]
+    cs = triangulation.opposite(ca, cb)
+    ct = triangulation.opposite(cb, ca)
+  }
+
+  var s0 = [ca, cb, cs].sort().join()
+  var s1 = [ca, cb, ct].sort().join()
+
+  var cells = triangulation.cells()
+  for(var i=0; i<cells.length; ++i) {
+    var f = cells[i]
+    var a = points[f[0]]
+    var b = points[f[1]]
+    var c = points[f[2]]
+    var fs = f.slice().sort().join()
+    if(fs === s0) {
+      context.fillStyle = '#0f0'
+    } else if(fs === s1) {
+      context.fillStyle = '#00f'
+    } else {
+      context.fillStyle = '#000'
+    }
+    drawSpiral(a, b, c)
+  }
+
+  for(var i=0; i<points.length; ++i) {
+    var p = points[i]
+    if(i === ca || i === cb) {
+      context.fillStyle = '#f00'
+    } else if(i === cs) {
+      context.fillStyle = '#0f0'
+    } else if(i === ct) {
+      context.fillStyle = '#00f'
+    } else {
+      context.fillStyle = '#000'
+    }
+    circle(p[0], p[1], 3)
+  }
+}
+draw()
+
+},{"../lib/triangulation":1,"canvas-fit":2,"delaunay-triangulate":15,"mouse-change":16,"robust-orientation":23,"segment2":26,"vec2":27}]},{},[28]);
+</script>
+</html>
