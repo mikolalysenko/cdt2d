@@ -24,9 +24,6 @@ function canonicalizeEdges(edges) {
 
 function cdt2d(points, edges, options) {
 
-  console.clear()
-  console.log('run triangulation')
-
   if(!Array.isArray(edges)) {
     options = edges || {}
     edges = []
@@ -40,8 +37,6 @@ function cdt2d(points, edges, options) {
 
   //Construct initial triangulation
   var cells = monotoneTriangulate(points, edges)
-
-  console.log('cells=', cells)
 
   //If delaunay refinement needed, then improve quality by edge flipping
   if(delaunay) {
