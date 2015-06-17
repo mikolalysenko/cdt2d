@@ -5,6 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "binary-search-bounds": "^2.0.3",
+    "robust-in-sphere": "^1.1.3",
     "robust-orientation": "^1.1.3"
   },
   "devDependencies": {

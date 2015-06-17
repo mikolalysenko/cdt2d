@@ -20,8 +20,6 @@ Constructs a constrained Delaunay triangulation of the point set
 * `options` is an object which takes some optional parameters.
     + `delaunay` if this flag is set to true, then return a Delaunay triangulation.  Otherwise if it is false, then an arbitrary triangulation is returned.  (Default `true`)
     + `pointAtInfinity` if set, then the triangulation is augmented with a point at infinity represented by the index `-1`.  (Default `false`)
-    + `noCCW` if this flag is set, then remove all counterclockwise oriented loops from the triangulation
-    + `noCW` if this flag is set, then remove all clockwise oriented loops from the triangulation
 
 **Returns** A list of all triangles represented as tuples of indices of vertices
 
