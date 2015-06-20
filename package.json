@@ -10,10 +10,17 @@
   },
   "devDependencies": {
     "canvas-fit": "^1.4.0",
+    "cell-orientation": "^1.0.1",
+    "convex-hull": "^1.0.3",
     "delaunay-triangulate": "^1.1.6",
+    "flip-orientation": "^1.0.1",
+    "gauss-random": "^1.0.1",
     "mouse-change": "^1.2.1",
     "robust-segment-intersect": "^1.0.1",
     "segment2": "^0.3.2",
+    "signum": "^1.0.0",
+    "simplicial-complex-boundary": "^1.0.1",
+    "tape": "^4.0.0",
     "vec2": "^1.6.0"
   },
   "scripts": {
