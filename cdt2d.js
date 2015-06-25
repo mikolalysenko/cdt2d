@@ -2,7 +2,8 @@
 
 var monotoneTriangulate = require('./lib/monotone')
 var makeIndex = require('./lib/triangulation')
-var delaunayRefine = require('./lib/delaunay')
+var delaunayFlip = require('./lib/delaunay')
+var filterTriangulation = require('./lib/filter')
 
 module.exports = cdt2d
 
@@ -11,15 +12,18 @@ function canonicalizeEdge(e) {
 }
 
 function compareEdge(a, b) {
-  var d = a[0] - b[0]
-  if(d) {
-    return d
-  }
-  return a[1] - b[1]
+  return a[0]-b[0] || a[1]-b[1]
 }
 
 function canonicalizeEdges(edges) {
   return edges.map(canonicalizeEdge).sort(compareEdge)
+}
+
+function getDefault(options, property, dflt) {
+  if(property in options) {
+    return options[property]
+  }
+  return dflt
 }
 
 function cdt2d(points, edges, options) {
@@ -33,26 +37,39 @@ function cdt2d(points, edges, options) {
   }
 
   //Parse out options
-  var delaunay = ('delaunay' in options) ? !!options.delaunay : true
+  var delaunay = !!getDefault(options, 'delaunay', true)
+  var interior = !!getDefault(options, 'interior', true)
+  var exterior = !!getDefault(options, 'exterior', true)
+
+  //Handle trivial case
+  if((!interior && !exterior) || points.length === 0) {
+    return []
+  }
 
   //Construct initial triangulation
   var cells = monotoneTriangulate(points, edges)
 
   //If delaunay refinement needed, then improve quality by edge flipping
-  if(delaunay) {
+  if(delaunay || interior !== exterior) {
 
     //Index all of the cells to support fast neighborhood queries
-    var triangulation = makeIndex(points.length)
+    var triangulation = makeIndex(points.length, canonicalizeEdges(edges))
     for(var i=0; i<cells.length; ++i) {
       var f = cells[i]
       triangulation.addTriangle(f[0], f[1], f[2])
     }
 
-    //Sort edges for set membership queries
-    var sortedEdges = canonicalizeEdges(edges)
 
-    //Run delaunay refinement
-    delaunayRefine(points, triangulation, sortedEdges)
+    //Run edge flipping
+    if(delaunay) {
+      delaunayFlip(points, triangulation)
+    }
+
+    if(!exterior) {
+      return filterTriangulation(triangulation, -1)
+    } else if(!interior) {
+      return filterTriangulation(triangulation,  1)
+    }
 
     //Return cells in triangulation
     return triangulation.cells()

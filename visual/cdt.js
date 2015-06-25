@@ -14,14 +14,20 @@ var context = canvas.getContext('2d')
 document.body.appendChild(canvas)
 window.addEventListener('resize', fit(canvas), false)
 
-function edgeDistance(a, b, c) {
-  var p = vec2(c[0], c[1])
-  return segment2(vec2(a[0], a[1]), vec2(b[0], b[1])).closestPointTo(p).distance(p)
-}
+var optionDiv = document.createElement('div')
+optionDiv.style.position = 'absolute'
+optionDiv.style.left = '5px'
+optionDiv.style.top = '5px'
+optionDiv.style['z-index'] = '10'
+document.body.appendChild(optionDiv)
 
 var points = []
 var edges = []
-
+var options = {
+  delaunay: true,
+  interior: true,
+  exterior: true
+}
 
 for(var i=0; i<2; ++i) {
   for(var j=0; j<4; ++j) {
@@ -29,7 +35,45 @@ for(var i=0; i<2; ++i) {
   }
 }
 
-var cells = createTriangulation(points, edges)
+var cells = createTriangulation(points, edges, options)
+
+Object.keys(options).forEach(function(name) {
+  var container = document.createElement('p')
+
+  var checkBox = document.createElement('input')
+  checkBox.type = 'checkbox'
+  checkBox.name = name
+  checkBox.checked = options[name]
+  checkBox.id = 'check_' + name
+
+  var label = document.createElement('label')
+  label.htmlFor = checkBox.id
+  label.appendChild(document.createTextNode(name))
+
+  checkBox.addEventListener('change', function() {
+    options[name] = !!checkBox.checked
+    cells = createTriangulation(points, edges, options)
+  })
+
+  container.appendChild(checkBox)
+  container.appendChild(label)
+
+  optionDiv.appendChild(container)
+})
+
+var resetButton = document.createElement('input')
+resetButton.type = 'button'
+resetButton.value = 'reset'
+optionDiv.appendChild(resetButton)
+resetButton.addEventListener('click', function() {
+  points.length = edges.length = 0
+  cells = createTriangulation(points, edges, options)
+})
+
+function edgeDistance(a, b, c) {
+  var p = vec2(c[0], c[1])
+  return segment2(vec2(a[0], a[1]), vec2(b[0], b[1])).closestPointTo(p).distance(p)
+}
 
 function isValidEdge(a, b) {
   for(var i=0; i<edges.length; ++i) {
@@ -84,11 +128,11 @@ mouseChange(canvas, function(buttons, x, y) {
   if(!lastButtons && !!buttons) {
     if(highlightEdge >= 0) {
       edges.splice(highlightEdge, 1)
-      cells = createTriangulation(points, edges)
+      cells = createTriangulation(points, edges, options)
       highlightEdge = -1
     } else if(highlightPoint < 0) {
       points.push([lx, ly])
-      cells = createTriangulation(points, edges)
+      cells = createTriangulation(points, edges, options)
     } else {
       startPoint = highlightPoint
       activeEdge = [ points[highlightPoint], [lx, ly] ]
@@ -112,11 +156,11 @@ discard_edge:
         }
         edges = nedges
         highlightPoint = -1
-        cells = createTriangulation(points, edges)
+        cells = createTriangulation(points, edges, options)
       } else if(highlightPoint >= 0) {
         if(isValidEdge(points[startPoint], points[highlightPoint])) {
           edges.push([startPoint, highlightPoint])
-          cells = createTriangulation(points, edges)
+          cells = createTriangulation(points, edges, options)
         }
       }
       startPoint = -1

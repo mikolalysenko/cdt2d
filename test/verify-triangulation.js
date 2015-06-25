@@ -1,7 +1,6 @@
 module.exports = verifyTriangulation
 
-var ch = require('convex-hull')
-var bnd = require('simplicial-complex-boundary')
+var hull = require('convex-hull')
 var uniq = require('uniq')
 var flip = require('flip-orientation')
 var tritri2d = require('robust-triangle-triangle-2d-intersect')
@@ -28,12 +27,6 @@ function verifyTriangulation(tape, points, edges, triangles) {
     })
   }
 
-  //Verify:
-  //  1. boundary of triangulation = convex hull
-  var B = bnd(triangles).sort(compareLex)
-  var H = ch(points).map(flip).sort(compareLex)
-  tape.equals(B.join(';'), H.join(';'), 'boundary is convex hull')
-
   //  3. no degenerate triangles
   for(var i=0; i<triangles.length; ++i) {
     tape.ok(cellOrientation(triangles[i]) !== 0, 'non degenerate: ' + triangles[i].join())
@@ -52,7 +45,7 @@ function verifyTriangulation(tape, points, edges, triangles) {
   }
 
   //  4. every point is contained in at least one triangle
-  if(H.length > 0) {
+  if(hull(points).length > 0) {
     var pts = []
     for(var i=0; i<triangles.length; ++i) {
       var tri = triangles[i]
@@ -63,6 +56,8 @@ function verifyTriangulation(tape, points, edges, triangles) {
     for(var i=0; i<pts.length; ++i) {
       tape.equals(pts[i], i)
     }
+  } else {
+    tape.equals(triangles.length, 0)
   }
 
   //  5. every triangle is positively oriented
@@ -71,17 +66,17 @@ function verifyTriangulation(tape, points, edges, triangles) {
     tape.ok(orient(
       points[tri[0]],
       points[tri[1]],
-      points[tri[2]]) <= 0, 'orientation: ' + tri.join() + ' >= 0')
+      points[tri[2]]) <= 0, 'orientation: ' + tri.join() + ' <= 0')
   }
 
   //  6. Check edge constraints are satisifed
-  var edgeSet = triangles.forEach(function(tri, c) {
+  var edgeSet = {}
+  triangles.forEach(function(tri) {
     for(var i=0; i<3; ++i) {
       var u = tri[i], v = tri[(i+1)%3]
-      c[Math.min(u, v) + ',' + Math.max(u, v)] = true
+      edgeSet[Math.min(u, v) + ',' + Math.max(u, v)] = true
     }
-    return c
-  }, {})
+  })
   edges.forEach(function(e) {
     var str = Math.min(e[0], e[1]) + ',' + Math.max(e[0], e[1])
     tape.ok(str in edgeSet, 'edge constraint ' + e + ' satisfied')
