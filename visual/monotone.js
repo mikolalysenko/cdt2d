@@ -14,7 +14,6 @@ var context = canvas.getContext('2d')
 document.body.appendChild(canvas)
 window.addEventListener('resize', fit(canvas), false)
 
-
 function edgeDistance(a, b, c) {
   var p = vec2(c[0], c[1])
   return segment2(vec2(a[0], a[1]), vec2(b[0], b[1])).closestPointTo(p).distance(p)
@@ -22,7 +21,14 @@ function edgeDistance(a, b, c) {
 
 var points = []
 var edges = []
-var cells = []
+
+for(var i=0; i<4; ++i) {
+  for(var j=0; j<4; ++j) {
+    points.push([0.25 + i/10,0.25 + j/10])
+  }
+}
+
+var cells = createTriangulation(points, edges)
 
 function isValidEdge(a, b) {
   for(var i=0; i<edges.length; ++i) {

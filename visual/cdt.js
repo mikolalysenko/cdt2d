@@ -21,7 +21,15 @@ function edgeDistance(a, b, c) {
 
 var points = []
 var edges = []
-var cells = []
+
+
+for(var i=0; i<2; ++i) {
+  for(var j=0; j<4; ++j) {
+    points.push([0.25 + i/10,0.25 + j/10])
+  }
+}
+
+var cells = createTriangulation(points, edges)
 
 function isValidEdge(a, b) {
   for(var i=0; i<edges.length; ++i) {
