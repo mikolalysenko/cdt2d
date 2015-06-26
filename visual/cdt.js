@@ -26,14 +26,23 @@ var edges = []
 var options = {
   delaunay: true,
   interior: true,
-  exterior: true
+  exterior: true,
+  infinity: false
 }
 
-for(var i=0; i<2; ++i) {
+for(var i=0; i<4; ++i) {
   for(var j=0; j<4; ++j) {
     points.push([0.25 + i/10,0.25 + j/10])
   }
 }
+
+for(var i=0; i<3; ++i) {
+  edges.push([i, i+1])
+  edges.push([i+12, i+13])
+  edges.push([4*i, 4*i+4])
+  edges.push([4*i+3, 4*i+7])
+}
+//edges.push([5,6], [9,10], [5,9], [6,10])
 
 var cells = createTriangulation(points, edges, options)
 
@@ -64,11 +73,17 @@ Object.keys(options).forEach(function(name) {
 var resetButton = document.createElement('input')
 resetButton.type = 'button'
 resetButton.value = 'reset'
-optionDiv.appendChild(resetButton)
 resetButton.addEventListener('click', function() {
   points.length = edges.length = 0
   cells = createTriangulation(points, edges, options)
 })
+var resetP = document.createElement('p')
+resetP.appendChild(resetButton)
+optionDiv.appendChild(resetP)
+
+var description = document.createElement('p')
+description.innerHTML = 'click to add/remove points<br>drag to add constraints'
+optionDiv.appendChild(description)
 
 function edgeDistance(a, b, c) {
   var p = vec2(c[0], c[1])
@@ -78,6 +93,9 @@ function edgeDistance(a, b, c) {
 function isValidEdge(a, b) {
   for(var i=0; i<edges.length; ++i) {
     var e = edges[i]
+    if(e[0] < 0 || e[1] < 0) {
+      continue
+    }
     var p = points[e[0]]
     var q = points[e[1]]
     if( (p === a && q !== b) ||
@@ -87,6 +105,15 @@ function isValidEdge(a, b) {
       continue
     }
     if(segCrosses(a, b, p, q)) {
+      return false
+    }
+  }
+  for(var i=0; i<points.length; ++i) {
+    var p = points[i]
+    if(p === a || p === b) {
+      continue
+    }
+    if(segCrosses(a, b, p, p)) {
       return false
     }
   }
@@ -113,10 +140,12 @@ mouseChange(canvas, function(buttons, x, y) {
     }
   }
 
-
   if(highlightPoint < 0) {
     for(var i=0; i<edges.length; ++i) {
       var e = edges[i]
+      if(e[0] < 0 || e[1] < 0) {
+        continue
+      }
       var d2 = edgeDistance(points[e[0]], points[e[1]], [lx, ly])
       if(d2 < closestDist) {
         highlightEdge = i
@@ -204,12 +233,37 @@ function drawSpiral(a, b, c) {
   var h = canvas.height
   var x = w * (a[0] + b[0] + c[0]) / 3.0
   var y = h * (a[1] + b[1] + c[1]) / 3.0
-  context.font = Math.ceil(Math.min(w, h)*0.025) + 'px Verdana'
+  var size = Math.ceil(Math.min(w, h)*0.025)
+  context.font = size + 'px Verdana'
   if(orient(a, b, c) > 0) {
-    context.fillText(CW_ARROW, x, y)
+    context.fillText(CW_ARROW, x-0.5*size, y+0.25*size)
   } else {
-    context.fillText(CCW_ARROW, x, y)
+    context.fillText(CCW_ARROW, x-0.5*size, y+0.25*size)
   }
+}
+
+function length(v) {
+  return Math.sqrt(Math.pow(v[0], 2) + Math.pow(v[1], 2))
+}
+
+function scale(v, s) {
+  return [v[0]*s, v[1]*s]
+}
+
+function sum(u, v) {
+  return [u[0]+v[0], u[1]+v[1]]
+}
+
+function bisector(a, b, c) {
+  console.log(a, b, c)
+  var ab = [a[0] - b[0], a[1] - b[1]]
+  var cb = [c[0] - b[0], c[1] - b[1]]
+  var d = sum(scale(ab, length(cb)), scale(cb, length(ab)))
+  var l = length(d)
+  if(l > 1e-6) {
+    return scale(d, 1.0 / l)
+  }
+  return scale([ ab[1], -ab[0] ], 1.0 / length(ab))
 }
 
 function draw() {
@@ -220,8 +274,24 @@ function draw() {
   context.fillStyle = '#fff'
   context.fillRect(0, 0, w, h)
 
+  var neighbors = new Array(points.length)
+  for(var i=0; i<points.length; ++i) {
+    neighbors[i] = [-1,-1]
+  }
+
   for(var i=0; i<cells.length; ++i) {
     var f = cells[i]
+    if(f[0] < 0 || f[1] < 0 || f[2] < 0) {
+      for(var j=0; j<3; ++j) {
+        if(f[j] < 0) {
+          var x = f[(j+1)%3]
+          var y = f[(j+2)%3]
+          neighbors[x][0] = y
+          neighbors[y][1] = x
+        }
+      }
+      continue
+    }
     var a = points[f[0]]
     var b = points[f[1]]
     var c = points[f[2]]
@@ -232,6 +302,18 @@ function draw() {
     line(b, c)
     line(c, a)
     drawSpiral(a, b, c)
+  }
+
+  for(var i=0; i<points.length; ++i) {
+    var ray = neighbors[i]
+    if(ray[0] < 0 || ray[1] < 0) {
+      continue
+    }
+    var a = points[ray[0]]
+    var b = points[i]
+    var c = points[ray[1]]
+    context.strokeStyle = '#000'
+    line(b, sum(scale(bisector(a, b, c), -10), b))
   }
 
   for(var i=0; i<edges.length; ++i) {
@@ -259,7 +341,6 @@ function draw() {
     context.strokeStyle = '#f00'
     line(points[e[0]], points[e[1]])
   }
-
 
   for(var i=0; i<points.length; ++i) {
     var p = points[i]

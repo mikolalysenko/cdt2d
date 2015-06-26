@@ -21,7 +21,7 @@ Constructs a constrained Delaunay triangulation of the point set
     + `delaunay` if this flag is set to true, then return a Delaunay triangulation.  Otherwise if it is false, then an arbitrary triangulation is returned.  (Default `true`)
     + `interior` if set, only return interior faces (Default `true`)
     + `exterior` if set, only return exterior faces (Default `true`)
-    + `pointAtInfinity` if set, then the triangulation is augmented with a point at infinity represented by the index `-1`.  (Default `false`)
+    + `infinity` if set, then the triangulation is augmented with a point at infinity represented by the index `-1`.  (Default `false`)
 
 **Returns** A list of all triangles represented as tuples of indices of vertices
 
