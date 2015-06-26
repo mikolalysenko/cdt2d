@@ -51,7 +51,15 @@ console.log(cdt2d(points, edges, {exterior: false}))
 
 The above program will output the following triangles:
 
-```
+```javascript
+[ [ 0, 3, 7 ],
+  [ 0, 6, 1 ],
+  [ 0, 7, 6 ],
+  [ 1, 5, 2 ],
+  [ 1, 6, 5 ],
+  [ 2, 4, 3 ],
+  [ 2, 5, 4 ],
+  [ 3, 4, 7 ] ]
 ```
 
 Each triangle is represented as an array of 3 indices of points.  We can visualize this data in the following figure:
