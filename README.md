@@ -6,7 +6,6 @@ A robust 2D [constrained Delaunay triangulation](https://en.wikipedia.org/wiki/C
 
 # [Demo](https://mikolalysenko.github.io/cdt2d)
 
-
 # Example
 
 ## Simple example

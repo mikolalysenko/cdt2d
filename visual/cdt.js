@@ -81,7 +81,7 @@ resetP.appendChild(resetButton)
 optionDiv.appendChild(resetP)
 
 var description = document.createElement('p')
-description.innerHTML = 'click to add/remove points<br>drag to add constraints'
+description.innerHTML = 'click to add/remove points<br>drag to add constraints<br><a href="https://github.com/mikolalysenko/cdt2d">Project page</a>'
 optionDiv.appendChild(description)
 
 function edgeDistance(a, b, c) {
