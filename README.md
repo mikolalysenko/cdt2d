@@ -4,9 +4,12 @@ A robust 2D [constrained Delaunay triangulation](https://en.wikipedia.org/wiki/C
 
 **WORK IN PROGRESS**
 
-# Demo
+# [Demo](https://mikolalysenko.github.io/cdt2d)
+
 
 # Example
+
+## Simple example
 
 Here is a simple example showing how to invoke `cdt2d`:
 
@@ -66,6 +69,18 @@ Each triangle is represented as an array of 3 indices of points.  We can visuali
 
 <img src="img/example-cdt.png">
 
+## Polygon example
+
+**TODO**
+
+## Polygon with holes example
+
+**TODO**
+
+## Delaunay triangulation example
+
+**TODO**
+
 # Install
 
 This module works in any modern CommonJS environment.  You can install it using [npm](https://docs.npmjs.com/) with the following command:
@@ -103,9 +118,12 @@ If your input does not satisfy these conditions, you wil need to preprocess it f
 
 **Limitations** Currently there is no way to specify that only some edge constraints are to be included in the boundary.  It is also not possible to add a constraint from a vertex to the point at infinity. If there is enough demand I may add these features or perhaps create a separate module.
 
-# Benchmarks
+# Benchmarks and comparisons
 
-**TODO**
+Assertion: `cdt2d` is the only non-broken triangulation library in JavaScript.
+
+* **TODO** Catalogue failing cases for other libraries
+* **TODO** Need to measure performance and finetune
 
 # License
 (c) 2015 Mikola Lysenko. MIT License

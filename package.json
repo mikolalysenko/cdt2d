@@ -40,7 +40,17 @@
     "planar",
     "graph",
     "vertex",
-    "geometry"
+    "geometry",
+    "cdt",
+    "2d",
+    "triangle",
+    "edge",
+    "point",
+    "robust",
+    "exact",
+    "constraint",
+    "hole",
+    "loop"
   ],
   "author": "Mikola Lysenko",
   "license": "MIT",
