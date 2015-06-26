@@ -12,9 +12,7 @@ To test out this module, you can open up a demo in your browser with the followi
 
 [<img src="img/demo.png">](https://mikolalysenko.github.io/cdt2d)
 
-* [cdt2d demo](https://mikolalysenko.github.io/cdt2d)
-
-The interactions are as follows:
+#### [cdt2d demo](https://mikolalysenko.github.io/cdt2d)
 
 * Click to add points
 * Click on a point to remove it
@@ -23,8 +21,7 @@ The interactions are as follows:
 * Toggle options by clicking on the checkboxes on the left
 * Click reset to clear all points
 
-
-# Example
+# Examples
 
 ## Simple example
 
