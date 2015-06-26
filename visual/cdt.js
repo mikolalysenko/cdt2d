@@ -125,8 +125,9 @@ var lastButtons = 0,
   highlightEdge = -1,
   activeEdge = null
 mouseChange(canvas, function(buttons, x, y) {
-  var lx = x / canvas.width
-  var ly = y / canvas.height
+  var s = Math.min(canvas.width, canvas.height)
+  var lx = (x - canvas.width/2) / s + 0.5
+  var ly = (y - canvas.height/2) / s + 0.5
   var closestDist = 0.0125
   highlightPoint = -1
   highlightEdge = -1
