@@ -10,6 +10,8 @@ A robust 2D [constrained Delaunay triangulation](https://en.wikipedia.org/wiki/C
 
 To test out this module, you can open up a demo in your browser with the following link:
 
+[<img src="img/demo.png">](https://mikolalysenko.github.io/cdt2d)
+
 * [cdt2d demo](https://mikolalysenko.github.io/cdt2d)
 
 The interactions are as follows:
