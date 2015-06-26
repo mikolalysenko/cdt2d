@@ -81,7 +81,7 @@ resetP.appendChild(resetButton)
 optionDiv.appendChild(resetP)
 
 var description = document.createElement('p')
-description.innerHTML = 'click to add/remove points<br>drag to add constraints'
+description.innerHTML = 'click to add/remove points<br>drag to add constraints<br><a href="https://github.com/mikolalysenko/cdt2d">Project page</a>'
 optionDiv.appendChild(description)
 
 function edgeDistance(a, b, c) {
@@ -203,24 +203,26 @@ discard_edge:
 })
 
 function line(a, b) {
-  var x0 = a[0]
-  var y0 = a[1]
-  var x1 = b[0]
-  var y1 = b[1]
+  var x0 = a[0]-0.5
+  var y0 = a[1]-0.5
+  var x1 = b[0]-0.5
+  var y1 = b[1]-0.5
   var w = canvas.width
   var h = canvas.height
+  var s = Math.min(w, h)
   context.beginPath()
-  context.moveTo(w*x0, h*y0)
-  context.lineTo(w*x1, h*y1)
+  context.moveTo(s*x0 + w/2, s*y0 + h/2)
+  context.lineTo(s*x1 + w/2, s*y1 + h/2)
   context.stroke()
 }
 
 function circle(x, y, r) {
   var w = canvas.width
   var h = canvas.height
+  var s = Math.min(w, h)
   context.beginPath()
-  context.moveTo(w*x, y*h)
-  context.arc(w*x, h*y, r, 0.0, 2.0*Math.PI)
+  context.moveTo(s*x, s*y)
+  context.arc(s*(x-0.5) + w/2, s*(y-0.5) + h/2, r, 0.0, 2.0*Math.PI)
   context.fill()
 }
 
@@ -230,9 +232,10 @@ var CCW_ARROW = '⟲'
 function drawSpiral(a, b, c) {
   var w = canvas.width
   var h = canvas.height
-  var x = w * (a[0] + b[0] + c[0]) / 3.0
-  var y = h * (a[1] + b[1] + c[1]) / 3.0
-  var size = Math.ceil(Math.min(w, h)*0.025)
+  var s = Math.min(w, h)
+  var x = s * ((a[0] + b[0] + c[0]) / 3.0 - 0.5) + w/2
+  var y = s * ((a[1] + b[1] + c[1]) / 3.0 - 0.5) + h/2
+  var size = Math.ceil(s*0.025)
   context.font = size + 'px Verdana'
   if(orient(a, b, c) > 0) {
     context.fillText(CW_ARROW, x-0.5*size, y+0.25*size)
@@ -312,7 +315,7 @@ function draw() {
     var b = points[i]
     var c = points[ray[1]]
     context.strokeStyle = '#000'
-    line(b, sum(scale(bisector(a, b, c), -10), b))
+    line(b, sum(scale(bisector(a, b, c), -1000), b))
   }
 
   for(var i=0; i<edges.length; ++i) {

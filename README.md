@@ -1,10 +1,27 @@
 cdt2d
 =====
+<img src="img/logo.png">
+
 A robust 2D [constrained Delaunay triangulation](https://en.wikipedia.org/wiki/Constrained_Delaunay_triangulation) library written in JavaScript.
 
 **WORK IN PROGRESS**
 
 # [Demo](https://mikolalysenko.github.io/cdt2d)
+
+To test out this module, you can open up a demo in your browser with the following link:
+
+[<img src="img/demo.png">](https://mikolalysenko.github.io/cdt2d)
+
+* [cdt2d demo](https://mikolalysenko.github.io/cdt2d)
+
+The interactions are as follows:
+
+* Click to add points
+* Click on a point to remove it
+* Drag one point onto another to add an edge constraint
+* Click on a green edge to remove a constraint
+* Toggle options by clicking on the checkboxes on the left
+* Click reset to clear all points
 
 
 # Example
