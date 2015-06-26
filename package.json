@@ -1,6 +1,6 @@
 {
   "name": "cdt2d",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Constrained Delaunay Triangulation in 2D",
   "main": "index.js",
   "dependencies": {
