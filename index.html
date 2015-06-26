@@ -3373,7 +3373,6 @@ function sum(u, v) {
 }
 
 function bisector(a, b, c) {
-  console.log(a, b, c)
   var ab = [a[0] - b[0], a[1] - b[1]]
   var cb = [c[0] - b[0], c[1] - b[1]]
   var d = sum(scale(ab, length(cb)), scale(cb, length(ab)))
