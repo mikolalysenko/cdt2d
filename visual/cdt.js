@@ -30,19 +30,48 @@ var options = {
   infinity: false
 }
 
+/*
 for(var i=0; i<4; ++i) {
   for(var j=0; j<4; ++j) {
     points.push([0.25 + i/10,0.25 + j/10])
   }
 }
-
 for(var i=0; i<3; ++i) {
   edges.push([i, i+1])
   edges.push([i+12, i+13])
   edges.push([4*i, 4*i+4])
   edges.push([4*i+3, 4*i+7])
 }
-//edges.push([5,6], [9,10], [5,9], [6,10])
+edges.push([5,6], [9,10], [5,9], [6,10])
+*/
+
+points = [
+  [-2,-2],
+  [-2, 2],
+  [ 2, 2],
+  [ 2,-2],
+  [ 1, 0],
+  [ 0, 1],
+  [-1, 0],
+  [ 0,-1]
+]
+
+for(var i=0; i<points.length; ++i) {
+  for(var j=0; j<2; ++j) {
+    points[i][j] = 0.1 * points[i][j] + 0.5
+  }
+}
+
+edges = [
+  [0, 1],
+  [1, 2],
+  [2, 3],
+  [3, 0],
+  [4, 5],
+  [5, 6],
+  [6, 7],
+  [7, 4]
+]
 
 var cells = createTriangulation(points, edges, options)
 
