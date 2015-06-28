@@ -83,15 +83,69 @@ Each triangle is represented as an array of 3 indices of points.  We can visuali
 
 <img src="img/example-cdt.png">
 
+## Messy graphs
+
+If your input doesn't satisfy the validity invariants (ie no self intersections, duplicate vertices or t-junctions), then you will need to preprocess it to clean it up.  One way to do this is with the [`clean-pslg` module](https://github.com/mikolalysenko/clean-pslg).  Here is an example showing how to do this:
+
+```javascript
+var cleanPSLG = require('clean-pslg')
+var cdt2d = require('cdt2d')
+
+var points = [
+  [-1, 0],
+  [ 1, 0],
+  [ 0,-1],
+  [ 0, 1]
+]
+
+var edges = [
+  [0, 1],
+  [1, 2]
+]
+
+//This updates points/edges so that they now form a valid PSLG
+cleanPSLG(points, edges)
+
+//Generate the triangulation
+console.log({
+  points: points,
+  edges: edges,
+  triangles: cdt2d(points, edges)
+})
+```
+
+#### Output
+
 ## Polygon example
+
+It is also pretty easy to use this module with polygons, as one would get from a GeoJSON file.  To do this, it is first necessary to convert them into a planar straight line graph.  This can be done using the `poly-to-pslg` module:
+
+```javascript
+var toPSLG = require('poly-to-pslg')
+var cdt2d = require('cdt2d')
+
+```
 
 **TODO**
 
 ## Polygon with holes example
 
+The above procedure even works if the polygons have holes:
+
+```javascript
+var toPSLG = require('poly-to-pslg')
+var cdt2d = require('cdt2d')
+
+```
+
 **TODO**
 
-## Delaunay triangulation example
+## Delaunay triangulation
+
+You can also use `cdt2d` to generate Delaunay triangulations of arbitrary point sets in the plane:
+
+```javascript
+```
 
 **TODO**
 
@@ -128,7 +182,7 @@ Constructs a constrained Delaunay triangulation of a [planar straight-line graph
 * No pair of edge constraints cross in their relative interior
 * No point is contained in the relative interior of an edge (ie no T-junctions)
 
-If your input does not satisfy these conditions, you wil need to preprocess it first otherwise `cdt2d` may return incorrect results.
+If your input does not satisfy these conditions, you will need to preprocess it first (using [`clean-pslg`](https://github.com/mikolalysenko/clean-pslg) for example) otherwise `cdt2d` may return incorrect results.
 
 **Limitations** Currently there is no way to specify that only some edge constraints are to be included in the boundary.  It is also not possible to add a constraint from a vertex to the point at infinity. If there is enough demand I may add these features or perhaps create a separate module.
 
@@ -138,6 +192,13 @@ Assertion: `cdt2d` is the only non-broken triangulation library in JavaScript.
 
 * **TODO** Catalogue failing cases for other libraries
 * **TODO** Need to measure performance and finetune
+
+Libraries to compare against:
+
+* `earcut`
+* `poly2tri`
+* `pnltri`
+* `libtess.js`
 
 # License
 (c) 2015 Mikola Lysenko. MIT License
