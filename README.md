@@ -116,6 +116,8 @@ console.log({
 
 #### Output
 
+**TODO**
+
 ## Polygon example
 
 It is also pretty easy to use this module with polygons, as one would get from a GeoJSON file.  To do this, it is first necessary to convert them into a planar straight line graph.  This can be done using the `poly-to-pslg` module:
